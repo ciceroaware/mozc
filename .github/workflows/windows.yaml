@@ -60,10 +60,11 @@ jobs:
           bazelisk build --config oss_windows --config release_build package
 
       - name: upload Mozc64_x64.msi
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: Mozc64_x64.msi
           path: src/bazel-bin/win32/installer/Mozc64.msi
+          archive: false
           if-no-files-found: warn
 
   build_arm64:
@@ -113,10 +114,11 @@ jobs:
           bazelisk build package --config oss_windows --config release_build --platforms=//:windows-arm64
 
       - name: upload Mozc64_arm64.msi
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: Mozc64_arm64.msi
           path: src/bazel-bin/win32/installer/Mozc64.msi
+          archive: false
           if-no-files-found: warn
 
   test:

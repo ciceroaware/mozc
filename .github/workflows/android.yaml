@@ -47,10 +47,11 @@ jobs:
           bazelisk build --config oss_android package --config release_build
 
       - name: upload artifacts
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: native_libs.zip
           path: src/bazel-bin/android/jni/native_libs.zip
+          archive: false
           if-no-files-found: warn
 
   build_on_mac:
