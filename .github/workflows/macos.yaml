@@ -22,7 +22,6 @@ jobs:
       - name: checkout
         uses: actions/checkout@v6
         with:
-          submodules: recursive
           persist-credentials: false
 
       - name: Try to restore update_deps cache
@@ -64,7 +63,6 @@ jobs:
       - name: checkout
         uses: actions/checkout@v6
         with:
-          submodules: recursive
           persist-credentials: false
 
       - name: Try to restore update_deps cache
@@ -106,7 +104,6 @@ jobs:
       - name: checkout
         uses: actions/checkout@v6
         with:
-          submodules: recursive
           persist-credentials: false
 
       - name: Try to restore update_deps cache
@@ -148,7 +145,6 @@ jobs:
       - name: checkout
         uses: actions/checkout@v6
         with:
-          submodules: recursive
           persist-credentials: false
 
       - name: Try to restore update_deps cache
@@ -180,7 +176,6 @@ jobs:
       - name: checkout
         uses: actions/checkout@v6
         with:
-          submodules: false
           persist-credentials: false
 
       - name: Try to restore update_deps cache
