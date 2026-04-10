@@ -375,9 +375,9 @@ void SystemUtil::SetUserProfileDirectory(const std::string& path) {
 #ifdef _WIN32
 namespace {
 // TODO(yukawa): Use API wrapper so that unit test can emulate any case.
-class ProgramFilesX86Cache {
+class ProgramFilesCache {
  public:
-  ProgramFilesX86Cache() : result_(E_FAIL) {
+  ProgramFilesCache() : result_(E_FAIL) {
     result_ = SafeTryProgramFilesPath(&path_);
   }
   const bool succeeded() const { return SUCCEEDED(result_); }
@@ -387,7 +387,7 @@ class ProgramFilesX86Cache {
  private:
   // b/5707813 implies that the Shell API causes an exception in some cases.
   // In order to avoid potential infinite loops in call_once. the constructor
-  // of ProgramFilesX86Cache must be exception free.
+  // of ProgramFilesCache must be exception free.
   // Note that __try and __except does not guarantees that any destruction
   // of internal C++ objects when a non-C++ exception occurs except that
   // /EHa compiler option is specified.
@@ -410,11 +410,8 @@ class ProgramFilesX86Cache {
     path->clear();
 
     wchar_t program_files_path_buffer[MAX_PATH] = {};
-    // For historical reasons Mozc executables have been installed under
-    // %ProgramFiles(x86)%.
-    // TODO(https://github.com/google/mozc/issues/1086): Stop using "(x86)".
     const HRESULT result =
-        ::SHGetFolderPathW(nullptr, CSIDL_PROGRAM_FILESX86, nullptr,
+        ::SHGetFolderPathW(nullptr, CSIDL_PROGRAM_FILES, nullptr,
                            SHGFP_TYPE_CURRENT, program_files_path_buffer);
     if (FAILED(result)) {
       return result;
@@ -476,14 +473,14 @@ std::string SystemUtil::GetServerDirectory() {
   if (!install_dir_from_registry.empty()) {
     return install_dir_from_registry;
   }
-  DCHECK(SUCCEEDED(Singleton<ProgramFilesX86Cache>::get()->result()));
+  DCHECK(SUCCEEDED(Singleton<ProgramFilesCache>::get()->result()));
 #if defined(GOOGLE_JAPANESE_INPUT_BUILD)
   return FileUtil::JoinPath(
-      FileUtil::JoinPath(Singleton<ProgramFilesX86Cache>::get()->path(),
+      FileUtil::JoinPath(Singleton<ProgramFilesCache>::get()->path(),
                          kCompanyNameInEnglish),
       kProductNameInEnglish);
 #else   // GOOGLE_JAPANESE_INPUT_BUILD
-  return FileUtil::JoinPath(Singleton<ProgramFilesX86Cache>::get()->path(),
+  return FileUtil::JoinPath(Singleton<ProgramFilesCache>::get()->path(),
                             kProductNameInEnglish);
 #endif  // GOOGLE_JAPANESE_INPUT_BUILD
 
@@ -771,7 +768,7 @@ bool SystemUtil::EnsureVitalImmutableDataIsAvailable() {
   if (!Singleton<SystemDirectoryCache>::get()->succeeded()) {
     return false;
   }
-  if (!Singleton<ProgramFilesX86Cache>::get()->succeeded()) {
+  if (!Singleton<ProgramFilesCache>::get()->succeeded()) {
     return false;
   }
   if (!Singleton<LocalAppDataDirectoryCache>::get()->succeeded()) {
