@@ -35,6 +35,7 @@
 #include <memory>
 #include <string>
 
+#include "absl/functional/any_invocable.h"
 #include "absl/strings/string_view.h"
 #include "absl/synchronization/notification.h"
 #include "absl/time/time.h"
@@ -179,33 +180,13 @@ class IPCClient : public IPCClientInterface {
   IPCErrorType last_ipc_error_;
 };
 
-class IPCClientFactoryInterface {
- public:
-  virtual ~IPCClientFactoryInterface() = default;
-  virtual std::unique_ptr<IPCClientInterface> NewClient(
-      absl::string_view name, absl::string_view path_name) = 0;
-
-  // old interface for backward compatibility.
-  // same as NewClient(name, "");
-  virtual std::unique_ptr<IPCClientInterface> NewClient(
-      absl::string_view name) = 0;
-};
-
-// Creates IPCClient object.
-class IPCClientFactory : public IPCClientFactoryInterface {
- public:
-  // new interface
-  std::unique_ptr<IPCClientInterface> NewClient(
-      absl::string_view name, absl::string_view path_name) override;
-
-  // old interface for backward compatibility.
-  // same as NewClient(name, "");
-  std::unique_ptr<IPCClientInterface> NewClient(
-      absl::string_view name) override;
-
-  // Return a singleton instance.
-  static IPCClientFactory* GetIPCClientFactory();
-};
+// Test seam: a callable that returns an IPCClient (or fake) for the given
+// service name and optional path.  Production code constructs IPCClient
+// directly when this callable is empty; tests inject a callable that
+// returns a fake.
+using IPCClientFactory =
+    absl::AnyInvocable<std::unique_ptr<IPCClientInterface>(
+        absl::string_view name, absl::string_view path) const>;
 
 // Synchronous, Single-thread IPC Server
 // Usage:

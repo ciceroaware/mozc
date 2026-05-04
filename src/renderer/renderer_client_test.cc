@@ -39,10 +39,10 @@
 #include "absl/strings/str_join.h"
 #include "absl/strings/str_split.h"
 #include "absl/strings/string_view.h"
-#include "absl/time/time.h"
 #include "base/number_util.h"
 #include "base/version.h"
 #include "ipc/ipc.h"
+#include "ipc/ipc_mock.h"
 #include "protocol/commands.pb.h"
 #include "protocol/renderer_command.pb.h"
 #include "testing/gunit.h"
@@ -61,61 +61,6 @@ std::string UpdateVersion(int diff) {
   return absl::StrJoin(tokens, ".");
 }
 
-struct IPCClientParams {
-  int counter = 0;
-  bool connected = false;
-  uint32_t server_protocol_version = IPC_PROTOCOL_VERSION;
-  std::string server_product_version = Version::GetMozcVersion();
-};
-
-class TestIPCClient : public IPCClientInterface {
- public:
-  explicit TestIPCClient(IPCClientParams& params) : params_(params) {}
-
-  bool Connected() const override { return params_.connected; }
-
-  uint32_t GetServerProtocolVersion() const override {
-    return params_.server_protocol_version;
-  }
-
-  absl::string_view GetServerProductVersion() const override {
-    return params_.server_product_version;
-  }
-
-  uint32_t GetServerProcessId() const override { return 0; }
-
-  // just count up how many times Call is called.
-  bool Call(absl::string_view request, std::string* response,
-            absl::Duration timeout) override {
-    ++params_.counter;
-    return true;
-  }
-
-  IPCErrorType GetLastIPCError() const override { return IPC_NO_ERROR; }
-
- protected:
-  IPCClientParams& params_;
-};
-
-class TestIPCClientFactory : public IPCClientFactoryInterface {
- public:
-  explicit TestIPCClientFactory(IPCClientParams& client_params)
-      : client_params_(client_params) {}
-
-  std::unique_ptr<IPCClientInterface> NewClient(
-      absl::string_view name, absl::string_view path_name) override {
-    return std::make_unique<TestIPCClient>(client_params_);
-  }
-
-  std::unique_ptr<IPCClientInterface> NewClient(
-      absl::string_view name) override {
-    return std::make_unique<TestIPCClient>(client_params_);
-  }
-
- private:
-  IPCClientParams& client_params_;
-};
-
 class TestRendererLauncher : public RendererLauncherInterface {
  public:
   TestRendererLauncher()
@@ -126,10 +71,9 @@ class TestRendererLauncher : public RendererLauncherInterface {
 
   // implement StartServer.
   // return true if server can launched successfully.
-  void StartRenderer(
-      absl::string_view name, absl::string_view renderer_path,
-      bool disable_renderer_path_check,
-      IPCClientFactoryInterface* ipc_client_factory_interface) override {
+  void StartRenderer(absl::string_view name, absl::string_view renderer_path,
+                     bool disable_renderer_path_check,
+                     const IPCClientFactory* client_factory) override {
     start_renderer_called_ = true;
     LOG(INFO) << name << " " << renderer_path;
   }
@@ -187,18 +131,15 @@ class TestRendererLauncher : public RendererLauncherInterface {
 
 class RendererClientTest : public ::testing::Test {
  protected:
-  RendererClientTest() : factory_(client_params_) {}
-
   std::unique_ptr<RendererClient> NewClient() {
     return RendererClient::CreateForTesting(
-        kTestServiceName, &factory_, &launcher_,
+        kTestServiceName, factory_.Bind(), &launcher_,
         RendererClient::RendererPathCheckMode::ENABLED);
   }
 
-  void Reset() { client_params_.counter = 0; }
+  void Reset() { factory_.ResetCallCount(); }
 
-  IPCClientParams client_params_;
-  TestIPCClientFactory factory_;
+  FakeIPCClientFactory factory_;
   TestRendererLauncher launcher_;
 };
 
@@ -222,27 +163,27 @@ TEST_F(RendererClientTest, ActivateTest) {
     launcher_.set_can_connect(false);
     Reset();
     EXPECT_TRUE(client->Activate());
-    EXPECT_EQ(client_params_.counter, 0);
+    EXPECT_EQ(factory_.call_count(), 0);
   }
 
   {
     // No connection may happen if connected return false
     launcher_.set_available(false);
     launcher_.set_can_connect(true);
-    client_params_.connected = false;
+    factory_.SetConnection(false);
     Reset();
     EXPECT_TRUE(client->Activate());
-    EXPECT_EQ(client_params_.counter, 0);
+    EXPECT_EQ(factory_.call_count(), 0);
   }
 
   {
     // one IPC call happens
     launcher_.set_available(false);
     launcher_.set_can_connect(true);
-    client_params_.connected = true;
+    factory_.SetConnection(true);
     Reset();
     EXPECT_TRUE(client->Activate());
-    EXPECT_EQ(client_params_.counter, 1);
+    EXPECT_EQ(factory_.call_count(), 1);
   }
 
   {
@@ -253,7 +194,7 @@ TEST_F(RendererClientTest, ActivateTest) {
     EXPECT_TRUE(client->Activate());
     EXPECT_TRUE(client->Activate());
     EXPECT_TRUE(client->Activate());
-    EXPECT_EQ(client_params_.counter, 0);
+    EXPECT_EQ(factory_.call_count(), 0);
   }
 }
 
@@ -269,7 +210,7 @@ TEST_F(RendererClientTest, LaunchTest) {
     // renderer is not launched
     launcher_.Reset();
     launcher_.set_can_connect(false);
-    client_params_.connected = false;
+    factory_.SetConnection(false);
     EXPECT_TRUE(client->ExecCommand(command));
     EXPECT_FALSE(launcher_.is_start_renderer_called());
   }
@@ -278,7 +219,7 @@ TEST_F(RendererClientTest, LaunchTest) {
     // if connection is not available, start renderer process
     launcher_.Reset();
     launcher_.set_can_connect(true);
-    client_params_.connected = false;
+    factory_.SetConnection(false);
     command.set_visible(true);
     EXPECT_TRUE(client->ExecCommand(command));
     EXPECT_TRUE(launcher_.is_start_renderer_called());
@@ -289,7 +230,7 @@ TEST_F(RendererClientTest, LaunchTest) {
     // but the command type is HIDE, renderer is not launched
     launcher_.Reset();
     launcher_.set_can_connect(true);
-    client_params_.connected = false;
+    factory_.SetConnection(false);
     command.set_visible(false);
     command.set_type(commands::RendererCommand::UPDATE);
     EXPECT_TRUE(client->ExecCommand(command));
@@ -301,7 +242,7 @@ TEST_F(RendererClientTest, LaunchTest) {
     // if every state is OK, renderer is not launched
     launcher_.Reset();
     launcher_.set_can_connect(true);
-    client_params_.connected = true;
+    factory_.SetConnection(true);
     command.set_visible(true);
     EXPECT_TRUE(client->ExecCommand(command));
     EXPECT_TRUE(client->ExecCommand(command));
@@ -319,38 +260,38 @@ TEST_F(RendererClientTest, ConnectionTest) {
   {
     launcher_.Reset();
     launcher_.set_can_connect(true);
-    client_params_.connected = true;
+    factory_.SetConnection(true);
     Reset();
     EXPECT_TRUE(client->ExecCommand(command));
     EXPECT_TRUE(client->ExecCommand(command));
     EXPECT_TRUE(client->ExecCommand(command));
 
     // IPC should be called three times
-    EXPECT_EQ(client_params_.counter, 3);
+    EXPECT_EQ(factory_.call_count(), 3);
   }
 
   {
     // launcher denies connection
     launcher_.Reset();
     launcher_.set_can_connect(false);
-    client_params_.connected = true;
+    factory_.SetConnection(true);
     Reset();
     EXPECT_TRUE(client->ExecCommand(command));
     EXPECT_TRUE(client->ExecCommand(command));
     EXPECT_TRUE(client->ExecCommand(command));
-    EXPECT_EQ(client_params_.counter, 0);
+    EXPECT_EQ(factory_.call_count(), 0);
   }
 
   {
     // IPC connection is lost.
     launcher_.Reset();
     launcher_.set_can_connect(true);
-    client_params_.connected = false;
+    factory_.SetConnection(false);
     Reset();
     EXPECT_TRUE(client->ExecCommand(command));
     EXPECT_TRUE(client->ExecCommand(command));
     EXPECT_TRUE(client->ExecCommand(command));
-    EXPECT_EQ(client_params_.counter, 0);
+    EXPECT_EQ(factory_.call_count(), 0);
   }
 }
 
@@ -360,47 +301,47 @@ TEST_F(RendererClientTest, ShutdownTest) {
   {
     launcher_.Reset();
     launcher_.set_can_connect(true);
-    client_params_.connected = true;
+    factory_.SetConnection(true);
     Reset();
 
     // Shutdown with commands::RendererCommand::SHUTDOWN command
     EXPECT_TRUE(client->Shutdown(false));
     EXPECT_FALSE(launcher_.is_force_terminate_renderer_called());
-    EXPECT_EQ(client_params_.counter, 1);
+    EXPECT_EQ(factory_.call_count(), 1);
   }
 
   {
     launcher_.Reset();
     launcher_.set_can_connect(true);
-    client_params_.connected = true;
+    factory_.SetConnection(true);
     Reset();
 
     // Shutdown with ForceTerminateRenderer
     EXPECT_TRUE(client->Shutdown(true));
     EXPECT_TRUE(launcher_.is_force_terminate_renderer_called());
-    EXPECT_EQ(client_params_.counter, 0);
+    EXPECT_EQ(factory_.call_count(), 0);
   }
 
   {
     launcher_.Reset();
     launcher_.set_can_connect(false);
-    client_params_.connected = false;
+    factory_.SetConnection(false);
     Reset();
 
     EXPECT_TRUE(client->Shutdown(false));
     EXPECT_FALSE(launcher_.is_force_terminate_renderer_called());
-    EXPECT_EQ(client_params_.counter, 0);
+    EXPECT_EQ(factory_.call_count(), 0);
   }
 
   {
     launcher_.Reset();
     launcher_.set_can_connect(false);
-    client_params_.connected = false;
+    factory_.SetConnection(false);
     Reset();
 
     EXPECT_TRUE(client->Shutdown(true));
     EXPECT_FALSE(launcher_.is_force_terminate_renderer_called());
-    EXPECT_EQ(client_params_.counter, 0);
+    EXPECT_EQ(factory_.call_count(), 0);
   }
 }
 
@@ -413,12 +354,12 @@ TEST_F(RendererClientTest, ProtocolVersionMismatchNewer) {
   {
     launcher_.Reset();
     launcher_.set_can_connect(true);
-    client_params_.connected = true;
+    factory_.SetConnection(true);
     Reset();
-    client_params_.server_protocol_version = IPC_PROTOCOL_VERSION - 1;
+    factory_.SetServerProtocolVersion(IPC_PROTOCOL_VERSION - 1);
     EXPECT_TRUE(client->ExecCommand(command));
     EXPECT_TRUE(launcher_.is_force_terminate_renderer_called());
-    EXPECT_EQ(client_params_.counter, 0);
+    EXPECT_EQ(factory_.call_count(), 0);
   }
 }
 
@@ -431,12 +372,12 @@ TEST_F(RendererClientTest, ProtocolVersionMismatchOlder) {
   {
     launcher_.Reset();
     launcher_.set_can_connect(true);
-    client_params_.connected = true;
+    factory_.SetConnection(true);
     Reset();
-    client_params_.server_protocol_version = IPC_PROTOCOL_VERSION + 1;
+    factory_.SetServerProtocolVersion(IPC_PROTOCOL_VERSION + 1);
     EXPECT_TRUE(client->ExecCommand(command));
     EXPECT_FALSE(launcher_.is_force_terminate_renderer_called());
-    EXPECT_EQ(client_params_.counter, 0);
+    EXPECT_EQ(factory_.call_count(), 0);
   }
 }
 
@@ -445,17 +386,17 @@ TEST_F(RendererClientTest, MozcVersionMismatchNewer) {
 
   commands::RendererCommand command;
   command.set_type(commands::RendererCommand::NOOP);
-  client_params_.server_product_version = UpdateVersion(-1);
+  factory_.SetServerProductVersion(UpdateVersion(-1));
 
   {
     launcher_.Reset();
     launcher_.set_can_connect(true);
-    client_params_.connected = true;
+    factory_.SetConnection(true);
     Reset();
-    client_params_.server_protocol_version = IPC_PROTOCOL_VERSION;
+    factory_.SetServerProtocolVersion(IPC_PROTOCOL_VERSION);
     EXPECT_TRUE(client->ExecCommand(command));
     EXPECT_FALSE(launcher_.is_force_terminate_renderer_called());
-    EXPECT_EQ(client_params_.counter, 1);
+    EXPECT_EQ(factory_.call_count(), 1);
   }
 }
 
@@ -464,17 +405,17 @@ TEST_F(RendererClientTest, MozcVersionMismatchOlder) {
 
   commands::RendererCommand command;
   command.set_type(commands::RendererCommand::NOOP);
-  client_params_.server_product_version = UpdateVersion(1);
+  factory_.SetServerProductVersion(UpdateVersion(1));
 
   {
     launcher_.Reset();
     launcher_.set_can_connect(true);
-    client_params_.connected = true;
+    factory_.SetConnection(true);
     Reset();
-    client_params_.server_protocol_version = IPC_PROTOCOL_VERSION;
+    factory_.SetServerProtocolVersion(IPC_PROTOCOL_VERSION);
     EXPECT_TRUE(client->ExecCommand(command));
     EXPECT_FALSE(launcher_.is_force_terminate_renderer_called());
-    EXPECT_EQ(client_params_.counter, 1);
+    EXPECT_EQ(factory_.call_count(), 1);
   }
 }
 
@@ -487,7 +428,7 @@ TEST_F(RendererClientTest, SetPendingCommandTest) {
   {
     launcher_.Reset();
     launcher_.set_can_connect(true);
-    client_params_.connected = false;
+    factory_.SetConnection(false);
     command.set_visible(true);
     EXPECT_TRUE(client->ExecCommand(command));
     EXPECT_TRUE(launcher_.is_start_renderer_called());
@@ -497,7 +438,7 @@ TEST_F(RendererClientTest, SetPendingCommandTest) {
   {
     launcher_.Reset();
     launcher_.set_can_connect(false);
-    client_params_.connected = false;
+    factory_.SetConnection(false);
     command.set_visible(true);
     EXPECT_TRUE(client->ExecCommand(command));
     EXPECT_TRUE(launcher_.is_set_pending_command_called());
@@ -506,7 +447,7 @@ TEST_F(RendererClientTest, SetPendingCommandTest) {
   {
     launcher_.Reset();
     launcher_.set_can_connect(true);
-    client_params_.connected = true;
+    factory_.SetConnection(true);
     command.set_visible(true);
     EXPECT_TRUE(client->ExecCommand(command));
     EXPECT_FALSE(launcher_.is_set_pending_command_called());

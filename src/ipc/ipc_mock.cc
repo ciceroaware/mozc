@@ -27,11 +27,10 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-// Mock of IPCClientFactoryInterface and IPCClientInterface for unittesting.
+// Unified fake of IPCClientInterface and the IPCClientFactory test seam.
 
 #include "ipc/ipc_mock.h"
 
-#include <cstdint>
 #include <memory>
 #include <string>
 
@@ -42,94 +41,39 @@
 
 namespace mozc {
 
-IPCClientMock::IPCClientMock(IPCClientFactoryMock *caller)
-    : caller_(caller),
-      connected_(false),
-      server_protocol_version_(0),
-      server_product_version_(Version::GetMozcVersion()),
-      server_process_id_(0),
-      result_(false) {}
+FakeIPCClientFactory::FakeIPCClientFactory()
+    : server_product_version_(Version::GetMozcVersion()) {}
 
-bool IPCClientMock::Connected() const { return connected_; }
-
-uint32_t IPCClientMock::GetServerProtocolVersion() const {
-  return server_protocol_version_;
+std::unique_ptr<IPCClientInterface> FakeIPCClientFactory::NewClient(
+    absl::string_view unused_name, absl::string_view path_name) {
+  return std::make_unique<FakeIPCClient>(this);
 }
 
-absl::string_view IPCClientMock::GetServerProductVersion() const {
-  return server_product_version_;
+std::unique_ptr<IPCClientInterface> FakeIPCClientFactory::NewClient(
+    absl::string_view unused_name) {
+  return std::make_unique<FakeIPCClient>(this);
 }
 
-uint32_t IPCClientMock::GetServerProcessId() const {
-  return server_process_id_;
+IPCClientFactory FakeIPCClientFactory::Bind() {
+  return [this](absl::string_view name, absl::string_view path) {
+    return NewClient(name, path);
+  };
 }
 
-bool IPCClientMock::Call(absl::string_view request, std::string *response,
+void FakeIPCClientFactory::RecordCall(absl::string_view request) {
+  last_request_.assign(request.data(), request.size());
+  ++call_count_;
+}
+
+bool FakeIPCClient::Call(absl::string_view request, std::string *response,
                          const absl::Duration timeout) {
-  caller_->SetGeneratedRequest(request);
-  if (!connected_ || !result_) {
+  factory_->RecordCall(request);
+  if (!factory_->connection() || !factory_->result()) {
     return false;
   }
-  response->assign(response_);
+  const absl::string_view canned = factory_->canned_response();
+  response->assign(canned.data(), canned.size());
   return true;
-}
-
-IPCClientFactoryMock::IPCClientFactoryMock()
-    : connection_(false),
-      result_(false),
-      server_protocol_version_(IPC_PROTOCOL_VERSION) {}
-
-std::unique_ptr<IPCClientInterface> IPCClientFactoryMock::NewClient(
-    absl::string_view unused_name, absl::string_view path_name) {
-  return NewClientMock();
-}
-
-std::unique_ptr<IPCClientInterface> IPCClientFactoryMock::NewClient(
-    absl::string_view unused_name) {
-  return NewClientMock();
-}
-
-absl::string_view IPCClientFactoryMock::GetGeneratedRequest() const {
-  return request_;
-}
-
-void IPCClientFactoryMock::SetGeneratedRequest(absl::string_view request) {
-  request_ = request;
-}
-
-void IPCClientFactoryMock::SetMockResponse(absl::string_view response) {
-  response_ = response;
-}
-
-void IPCClientFactoryMock::SetConnection(const bool connection) {
-  connection_ = connection;
-}
-
-void IPCClientFactoryMock::SetResult(const bool result) { result_ = result; }
-
-void IPCClientFactoryMock::SetServerProtocolVersion(
-    const uint32_t server_protocol_version) {
-  server_protocol_version_ = server_protocol_version;
-}
-
-void IPCClientFactoryMock::SetServerProductVersion(
-    absl::string_view server_product_version) {
-  server_product_version_ = server_product_version;
-}
-
-void IPCClientFactoryMock::SetServerProcessId(
-    const uint32_t server_process_id) {
-  server_process_id_ = server_process_id;
-}
-
-std::unique_ptr<IPCClientMock> IPCClientFactoryMock::NewClientMock() {
-  auto client = std::make_unique<IPCClientMock>(this);
-  client->set_connection(connection_);
-  client->set_result(result_);
-  client->set_response(response_);
-  client->set_server_protocol_version(server_protocol_version_);
-  client->set_server_product_version(server_product_version_);
-  return client;
 }
 
 }  // namespace mozc

@@ -112,7 +112,7 @@ class RendererLauncher : public RendererLauncherInterface {
   void StartRenderer(
       absl::string_view name, absl::string_view path,
       bool disable_renderer_path_check,
-      IPCClientFactoryInterface* ipc_client_factory_interface) override {
+      const IPCClientFactory* absl_nullable ipc_client_factory) override {
     if (Status() == RendererStatus::RENDERER_LAUNCHING ||
         Status() == RendererStatus::RENDERER_READY ||
         Status() == RendererStatus::RENDERER_TIMEOUT) {
@@ -124,7 +124,7 @@ class RendererLauncher : public RendererLauncherInterface {
     name_ = name;
     path_ = path;
     disable_renderer_path_check_ = disable_renderer_path_check;
-    ipc_client_factory_interface_ = ipc_client_factory_interface;
+    ipc_client_factory_ = ipc_client_factory;
     if (launcher_.has_value()) {
       launcher_->Wait();
     }
@@ -298,8 +298,7 @@ class RendererLauncher : public RendererLauncherInterface {
 
   void FlushPendingCommand() ABSL_LOCKS_EXCLUDED(mu_) {
     absl::MutexLock l(mu_);
-    if (ipc_client_factory_interface_ != nullptr &&
-        pending_command_.has_value()) {
+    if (pending_command_.has_value()) {
       std::unique_ptr<IPCClientInterface> client(CreateIPCClient());
       if (client != nullptr) {
         CallCommand(client.get(), *pending_command_);
@@ -315,20 +314,19 @@ class RendererLauncher : public RendererLauncherInterface {
   }
 
   std::unique_ptr<IPCClientInterface> CreateIPCClient() const {
-    if (ipc_client_factory_interface_ == nullptr) {
-      return nullptr;
+    const absl::string_view path =
+        disable_renderer_path_check_ ? absl::string_view() : path_;
+    if (ipc_client_factory_ != nullptr && *ipc_client_factory_) {
+      return (*ipc_client_factory_)(name_, path);
     }
-    if (disable_renderer_path_check_) {
-      return ipc_client_factory_interface_->NewClient(name_, "");
-    }
-    return ipc_client_factory_interface_->NewClient(name_, path_);
+    return std::make_unique<IPCClient>(name_, path);
   }
 
   std::string name_;
   std::string path_;
   absl::Time last_launch_time_ = absl::UnixEpoch();
   std::atomic<size_t> error_times_ = 0;
-  IPCClientFactoryInterface* ipc_client_factory_interface_ = nullptr;
+  const IPCClientFactory* absl_nullable ipc_client_factory_ = nullptr;
   mutable absl::Mutex mu_;
   std::optional<commands::RendererCommand> pending_command_
       ABSL_GUARDED_BY(mu_);
@@ -341,14 +339,14 @@ class RendererLauncher : public RendererLauncherInterface {
 
 RendererClient::RendererClient(
     absl::string_view name,
-    IPCClientFactoryInterface* absl_nullable ipc_client_factory_for_testing,
+    IPCClientFactory ipc_client_factory_for_testing,
     RendererLauncherInterface* absl_nullable renderer_launcher_for_testing,
     bool disable_renderer_path_check_for_testing)
     : is_window_visible_(false),
       version_mismatch_nums_(0),
       name_(name),
       default_renderer_launcher_(std::make_unique<RendererLauncher>()),
-      ipc_client_factory_for_testing_(ipc_client_factory_for_testing),
+      ipc_client_factory_for_testing_(std::move(ipc_client_factory_for_testing)),
       renderer_launcher_for_testing_(renderer_launcher_for_testing),
       disable_renderer_path_check_for_testing_(
           disable_renderer_path_check_for_testing) {}
@@ -452,7 +450,7 @@ bool RendererClient::ExecCommand(const commands::RendererCommand& command) {
     renderer_launcher->SetPendingCommand(command);
     renderer_launcher->StartRenderer(name_, SystemUtil::GetRendererPath(),
                                      disable_renderer_path_check_for_testing_,
-                                     GetIPCClientFactory());
+                                     &ipc_client_factory_for_testing_);
     return true;
   }
 
@@ -492,14 +490,6 @@ bool RendererClient::ExecCommand(const commands::RendererCommand& command) {
   return true;
 }
 
-IPCClientFactoryInterface* absl_nonnull RendererClient::GetIPCClientFactory()
-    const {
-  if (ipc_client_factory_for_testing_ != nullptr) {
-    return ipc_client_factory_for_testing_;
-  }
-  return IPCClientFactory::GetIPCClientFactory();  // This is singleton
-}
-
 RendererLauncherInterface* absl_nonnull RendererClient::GetRendererLauncher()
     const {
   if (renderer_launcher_for_testing_ != nullptr) {
@@ -509,10 +499,13 @@ RendererLauncherInterface* absl_nonnull RendererClient::GetRendererLauncher()
 }
 
 std::unique_ptr<IPCClientInterface> RendererClient::CreateIPCClient() const {
-  return GetIPCClientFactory()->NewClient(
-      name_, disable_renderer_path_check_for_testing_
-                 ? ""
-                 : SystemUtil::GetRendererPath());
+  const absl::string_view path = disable_renderer_path_check_for_testing_
+                                     ? absl::string_view()
+                                     : SystemUtil::GetRendererPath();
+  if (ipc_client_factory_for_testing_) {
+    return ipc_client_factory_for_testing_(name_, path);
+  }
+  return std::make_unique<IPCClient>(name_, path);
 }
 
 std::unique_ptr<RendererClient> RendererClient::Create() {
@@ -522,19 +515,19 @@ std::unique_ptr<RendererClient> RendererClient::Create() {
     absl::StrAppend(&name, ".", desktop_name);
   }
   return std::unique_ptr<RendererClient>(
-      new RendererClient(name, nullptr, nullptr, false));
+      new RendererClient(name, IPCClientFactory(), nullptr, false));
 }
 
 std::unique_ptr<RendererClient> RendererClient::CreateForTesting(
     absl::string_view name,
-    IPCClientFactoryInterface* absl_nullable ipc_client_factory_for_testing,
+    IPCClientFactory ipc_client_factory_for_testing,
     RendererLauncherInterface* absl_nullable renderer_launcher_for_testing,
     RendererPathCheckMode renderer_path_check_mode) {
   const bool disable_renderer_path_check_for_testing =
       (renderer_path_check_mode == RendererPathCheckMode::DISABLED);
   return std::unique_ptr<RendererClient>(new RendererClient(
-      name, ipc_client_factory_for_testing, renderer_launcher_for_testing,
-      disable_renderer_path_check_for_testing));
+      name, std::move(ipc_client_factory_for_testing),
+      renderer_launcher_for_testing, disable_renderer_path_check_for_testing));
 }
 
 }  // namespace renderer

@@ -46,8 +46,8 @@ namespace client {
 
 class ClientMock : public client::ClientInterface {
  public:
-  MOCK_METHOD(void, SetIPCClientFactory,
-              (IPCClientFactoryInterface * client_factory), (override));
+  MOCK_METHOD(void, SetIPCClientFactory, (IPCClientFactory client_factory),
+              (override));
   MOCK_METHOD(void, SetServerLauncher,
               (std::unique_ptr<ServerLauncherInterface> server_launcher),
               (override));

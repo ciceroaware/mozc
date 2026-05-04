@@ -31,13 +31,9 @@
 
 #include "ipc/ipc_test_util.h"
 
-#include <memory>
-
-#include "absl/strings/string_view.h"
-#include "ipc/ipc.h"
-
 #ifdef __APPLE__
 #include "absl/log/check.h"
+#include "absl/strings/string_view.h"
 #endif  // __APPLE__
 
 namespace mozc {
@@ -68,22 +64,4 @@ bool TestMachPortManager::IsServerRunning(absl::string_view name) const {
   return true;
 }
 #endif  // __APPLE__
-
-std::unique_ptr<IPCClientInterface> IPCClientFactoryOnMemory::NewClient(
-    absl::string_view name, absl::string_view path_name) {
-  auto new_client = std::make_unique<IPCClient>(name, path_name);
-#ifdef __APPLE__
-  new_client->SetMachPortManager(&mach_manager_);
-#endif  // __APPLE__
-  return new_client;
-}
-
-std::unique_ptr<IPCClientInterface> IPCClientFactoryOnMemory::NewClient(
-    absl::string_view name) {
-  auto new_client = std::make_unique<IPCClient>(name);
-#ifdef __APPLE__
-  new_client->SetMachPortManager(&mach_manager_);
-#endif  // __APPLE__
-  return new_client;
-}
 }  // namespace mozc

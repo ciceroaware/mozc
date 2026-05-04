@@ -38,12 +38,15 @@
 #include "absl/time/clock.h"
 #include "absl/time/time.h"
 #include "ipc/ipc.h"
-#include "ipc/ipc_test_util.h"
 #include "protocol/renderer_command.pb.h"
 #include "renderer/renderer_client.h"
 #include "renderer/renderer_interface.h"
 #include "testing/gunit.h"
 #include "testing/mozctest.h"
+
+#ifdef __APPLE__
+#include "ipc/ipc_test_util.h"
+#endif  // __APPLE__
 
 namespace mozc {
 namespace renderer {
@@ -91,10 +94,9 @@ class TestRendererServer : public RendererServer {
 // A renderer launcher which does nothing.
 class DummyRendererLauncher : public RendererLauncherInterface {
  public:
-  void StartRenderer(
-      absl::string_view name, absl::string_view renderer_path,
-      bool disable_renderer_path_check,
-      IPCClientFactoryInterface* ipc_client_factory_interface) override {
+  void StartRenderer(absl::string_view name, absl::string_view renderer_path,
+                     bool disable_renderer_path_check,
+                     const IPCClientFactory* client_factory) override {
     LOG(INFO) << name << " " << renderer_path;
   }
 
@@ -116,13 +118,15 @@ class DummyRendererLauncher : public RendererLauncherInterface {
 class RendererServerTest : public testing::TestWithTempUserProfile {};
 
 TEST_F(RendererServerTest, IPCTest) {
-  mozc::IPCClientFactoryOnMemory on_memory_client_factory;
+#ifdef __APPLE__
+  TestMachPortManager mach_manager;
+#endif  // __APPLE__
 
   auto server = std::make_unique<TestRendererServer>();
   TestRenderer renderer;
   server->SetRendererInterface(&renderer);
 #ifdef __APPLE__
-  server->SetMachPortManager(on_memory_client_factory.OnMemoryPortManager());
+  server->SetMachPortManager(&mach_manager);
 #endif  // __APPLE__
   renderer.Reset();
 
@@ -131,8 +135,21 @@ TEST_F(RendererServerTest, IPCTest) {
   absl::SleepFor(absl::Seconds(1));
 
   DummyRendererLauncher launcher;
+  IPCClientFactory client_factory =
+      [
+#ifdef __APPLE__
+          &mach_manager
+#endif  // __APPLE__
+  ](absl::string_view name,
+    absl::string_view path) -> std::unique_ptr<IPCClientInterface> {
+    auto c = std::make_unique<IPCClient>(name, path);
+#ifdef __APPLE__
+    c->SetMachPortManager(&mach_manager);
+#endif  // __APPLE__
+    return c;
+  };
   std::unique_ptr<RendererClient> client = RendererClient::CreateForTesting(
-      server->GetServiceName(), &on_memory_client_factory, &launcher,
+      server->GetServiceName(), std::move(client_factory), &launcher,
       RendererClient::RendererPathCheckMode::DISABLED);
 
   commands::RendererCommand command;

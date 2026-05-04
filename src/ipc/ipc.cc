@@ -36,7 +36,6 @@
 #include "absl/log/check.h"
 #include "absl/log/log.h"
 #include "absl/strings/string_view.h"
-#include "base/singleton.h"
 #include "base/thread.h"
 #include "ipc/ipc_path_manager.h"
 
@@ -66,21 +65,6 @@ void IPCServer::Wait() {
     server_thread_->Join();
     server_thread_.reset();
   }
-}
-
-std::unique_ptr<IPCClientInterface> IPCClientFactory::NewClient(
-    absl::string_view name, absl::string_view path_name) {
-  return std::make_unique<IPCClient>(name, path_name);
-}
-
-std::unique_ptr<IPCClientInterface> IPCClientFactory::NewClient(
-    absl::string_view name) {
-  return std::make_unique<IPCClient>(name);
-}
-
-// static
-IPCClientFactory *IPCClientFactory::GetIPCClientFactory() {
-  return Singleton<IPCClientFactory>::get();
 }
 
 uint32_t IPCClient::GetServerProtocolVersion() const {

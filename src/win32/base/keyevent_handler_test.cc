@@ -96,7 +96,7 @@ LPARAM CreateLParam(uint16_t repeat_count, uint8_t scan_code,
 
 class TestServerLauncher : public client::ServerLauncherInterface {
  public:
-  explicit TestServerLauncher(IPCClientFactoryMock* factory)
+  explicit TestServerLauncher(FakeIPCClientFactory* factory)
       : factory_(factory),
         start_server_result_(false),
         start_server_called_(false),
@@ -157,7 +157,7 @@ class TestServerLauncher : public client::ServerLauncherInterface {
   }
 
  private:
-  IPCClientFactoryMock* factory_;
+  FakeIPCClientFactory* factory_;
   bool start_server_result_;
   bool start_server_called_;
   uint32_t server_protocol_version_;
@@ -217,7 +217,7 @@ class MockState {
     client_factory_.SetResult(true);
     client_factory_.SetServerProductVersion(Version::GetMozcVersion());
     client_factory_.SetMockResponse(mock_response.SerializeAsString());
-    client_->SetIPCClientFactory(&client_factory_);
+    client_->SetIPCClientFactory(client_factory_.Bind());
 
     auto launcher = std::make_unique<TestServerLauncher>(&client_factory_);
     launcher_ = launcher.get();
@@ -236,7 +236,7 @@ class MockState {
   bool start_server_called() { return launcher_->start_server_called(); }
 
  private:
-  IPCClientFactoryMock client_factory_;
+  FakeIPCClientFactory client_factory_;
   std::unique_ptr<client::ClientInterface> client_;
   TestServerLauncher* launcher_;
 };

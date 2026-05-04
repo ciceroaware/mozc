@@ -83,9 +83,9 @@ class ClientInterface {
  public:
   virtual ~ClientInterface() = default;
 
-  // NOTE: Client class does NOT take the ownership of client_factory
-  virtual void SetIPCClientFactory(
-      IPCClientFactoryInterface* client_factory) = 0;
+  // Sets a test-only override for IPC client construction.  Pass an empty
+  // factory to restore the production default (direct IPCClient).
+  virtual void SetIPCClientFactory(IPCClientFactory client_factory) = 0;
 
   // set ServerLauncher.
   // ServerLauncher is used as default.

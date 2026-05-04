@@ -68,6 +68,7 @@ mozc_cc_library(
         "//base:thread",
         "//base:util",
         "//base:vlog",
+        "@com_google_absl//absl/functional:any_invocable",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/status",
@@ -159,6 +160,7 @@ mozc_cc_library(
     hdrs = ["ipc_mock.h"],
     visibility = [
         "//client:__pkg__",
+        "//renderer:__pkg__",
         "//win32/base:__pkg__",
     ],
     deps = [
@@ -271,6 +273,7 @@ mozc_cc_library(
     textual_hdrs = ["ipc.h"],
     deps = [
         "//base:thread",
+        "@com_google_absl//absl/functional:any_invocable",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/synchronization",
         "@com_google_absl//absl/time",

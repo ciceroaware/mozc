@@ -92,12 +92,12 @@ mozc_cc_test(
         "//base:number_util",
         "//base:version",
         "//ipc",
+        "//ipc:ipc_mock",
         "//protocol:commands_cc_proto",
         "//protocol:renderer_cc_proto",
         "//testing:gunit_main",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/strings",
-        "@com_google_absl//absl/time",
     ],
 )
 

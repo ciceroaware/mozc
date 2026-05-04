@@ -94,8 +94,8 @@ class Client : public ClientInterface {
   // This function should be called before EnsureSession.
   void InitRequestForSvsJapanese(bool use_svs);
 
-  void SetIPCClientFactory(IPCClientFactoryInterface* client_factory) override {
-    client_factory_ = client_factory;
+  void SetIPCClientFactory(IPCClientFactory client_factory) override {
+    client_factory_ = std::move(client_factory);
   }
 
   // set ServerLauncher.
@@ -240,7 +240,8 @@ class Client : public ClientInterface {
   void GetHistoryInputs(std::vector<commands::Input>* result) const;
 
   uint64_t id_;
-  IPCClientFactoryInterface* client_factory_;
+  // Optional override; when empty, IPCClient is constructed directly.
+  IPCClientFactory client_factory_;
   std::unique_ptr<ServerLauncherInterface> server_launcher_;
   std::unique_ptr<config::Config> preferences_;
   std::unique_ptr<commands::Request> request_;

@@ -51,10 +51,13 @@ class RendererLauncherInterface {
   virtual ~RendererLauncherInterface() = default;
 
   // implement StartRenderer
+  // |client_factory| is an optional non-owning pointer to a test-only
+  // factory override; when null or empty, the launcher constructs IPCClient
+  // directly.  The pointee must outlive the launcher's pending work.
   virtual void StartRenderer(
       absl::string_view name, absl::string_view renderer_path,
       bool disable_renderer_path_check,
-      IPCClientFactoryInterface* client_factory_intarface) = 0;
+      const IPCClientFactory* absl_nullable client_factory) = 0;
 
   // force to terminate the renderer
   // do not use this method unless protocol version mismatch
@@ -89,7 +92,7 @@ class RendererClient final : public RendererInterface {
 
   static std::unique_ptr<RendererClient> CreateForTesting(
       absl::string_view name,
-      IPCClientFactoryInterface* absl_nullable ipc_client_factory_for_testing,
+      IPCClientFactory ipc_client_factory_for_testing,
       RendererLauncherInterface* absl_nullable renderer_launcher_for_testing,
       RendererPathCheckMode renderer_path_check_mode);
 
@@ -115,11 +118,10 @@ class RendererClient final : public RendererInterface {
  private:
   RendererClient(
       absl::string_view name,
-      IPCClientFactoryInterface* absl_nullable ipc_client_factory_for_testing,
+      IPCClientFactory ipc_client_factory_for_testing,
       RendererLauncherInterface* absl_nullable renderer_launcher_for_testing,
       bool disable_renderer_path_check_for_testing);
 
-  IPCClientFactoryInterface* absl_nonnull GetIPCClientFactory() const;
   RendererLauncherInterface* absl_nonnull GetRendererLauncher() const;
 
   std::unique_ptr<IPCClientInterface> CreateIPCClient() const;
@@ -130,8 +132,7 @@ class RendererClient final : public RendererInterface {
   std::unique_ptr<RendererLauncherInterface> default_renderer_launcher_;
 
   // Behavior overrides for testing
-  IPCClientFactoryInterface* const
-      absl_nullable ipc_client_factory_for_testing_;
+  const IPCClientFactory ipc_client_factory_for_testing_;
   RendererLauncherInterface* const absl_nullable renderer_launcher_for_testing_;
   const bool disable_renderer_path_check_for_testing_;
 };

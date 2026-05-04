@@ -32,8 +32,6 @@
 #ifndef MOZC_IPC_IPC_TEST_UTIL_H_
 #define MOZC_IPC_IPC_TEST_UTIL_H_
 
-#include <memory>
-
 #include "absl/strings/string_view.h"
 #include "ipc/ipc.h"
 
@@ -53,30 +51,5 @@ class TestMachPortManager : public mozc::MachPortManagerInterface {
   mach_port_t port_;
 };
 #endif  // __APPLE__
-
-// An IPCClientFactory which holds an in-memory port instead of actual
-// connections.  It is only available for Mac.  Otherwise it is same
-// as a normal IPCClientFactory.
-class IPCClientFactoryOnMemory : public IPCClientFactoryInterface {
- public:
-  IPCClientFactoryOnMemory() = default;
-  IPCClientFactoryOnMemory(const IPCClientFactoryOnMemory&) = delete;
-  IPCClientFactoryOnMemory& operator=(const IPCClientFactoryOnMemory&) = delete;
-
-  std::unique_ptr<IPCClientInterface> NewClient(
-      absl::string_view name, absl::string_view path_name) override;
-
-  std::unique_ptr<IPCClientInterface> NewClient(
-      absl::string_view name) override;
-
-#ifdef __APPLE__
-  // Returns MachPortManager to share the mach port between client and server.
-  MachPortManagerInterface* OnMemoryPortManager() { return &mach_manager_; }
-#endif  // __APPLE__
- private:
-#ifdef __APPLE__
-  TestMachPortManager mach_manager_;
-#endif  // __APPLE__
-};
 }  // namespace mozc
 #endif  // MOZC_IPC_IPC_TEST_UTIL_H_

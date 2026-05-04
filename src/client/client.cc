@@ -105,7 +105,6 @@ Client::Client()
       server_process_id_(0),
       last_mode_(commands::DIRECT) {
   response_.reserve(kResultBufferSize);
-  client_factory_ = IPCClientFactory::GetIPCClientFactory();
 
   // Initialize direct_mode_keys_
   direct_mode_keys_ = KeyInfoUtil::ExtractSortedDirectModeKeys(
@@ -564,18 +563,17 @@ bool Client::NoOperation() {
 
 // PingServer ignores all server status
 bool Client::PingServer() const {
-  if (client_factory_ == nullptr) {
-    return false;
-  }
-
   commands::Input input;
 
   InitInput(&input);
   input.set_type(commands::Input::NO_OPERATION);
 
   // Call IPC
-  std::unique_ptr<IPCClientInterface> client(client_factory_->NewClient(
-      kServerAddress, server_launcher_->server_program()));
+  std::unique_ptr<IPCClientInterface> client =
+      client_factory_
+          ? client_factory_(kServerAddress, server_launcher_->server_program())
+          : std::make_unique<IPCClient>(kServerAddress,
+                                        server_launcher_->server_program());
 
   if (client == nullptr) {
     LOG(ERROR) << "Cannot make client object";
@@ -635,10 +633,6 @@ bool Client::Call(const commands::Input &input, commands::Output *output) {
     return false;
   }
 
-  if (client_factory_ == nullptr) {
-    return false;
-  }
-
   // Serialize
   std::string request;
   if (!input.SerializeToString(&request)) {
@@ -647,8 +641,11 @@ bool Client::Call(const commands::Input &input, commands::Output *output) {
   }
 
   // Call IPC
-  std::unique_ptr<IPCClientInterface> client(client_factory_->NewClient(
-      kServerAddress, server_launcher_->server_program()));
+  std::unique_ptr<IPCClientInterface> client =
+      client_factory_
+          ? client_factory_(kServerAddress, server_launcher_->server_program())
+          : std::make_unique<IPCClient>(kServerAddress,
+                                        server_launcher_->server_program());
 
   // set client protocol version.
   // When an error occurs inside Connected() function,

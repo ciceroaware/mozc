@@ -40,91 +40,87 @@
 
 namespace mozc {
 
-class IPCClientFactoryMock;  // declared below.
-
-class IPCClientMock : public IPCClientInterface {
+// Unified fake for IPC unit tests.  FakeIPCClientFactory hands out
+// FakeIPCClient instances; both share state via the factory.  Tests configure
+// the factory via Set* methods and inspect the recorded request and call
+// count via the observer methods.  Plug into a production seam via Bind(),
+// which returns an IPCClientFactory callable that delegates to *this.
+class FakeIPCClientFactory {
  public:
-  IPCClientMock(const IPCClientMock &) = delete;
-  IPCClientMock &operator=(const IPCClientMock &) = delete;
-  explicit IPCClientMock(IPCClientFactoryMock *caller);
-  bool Connected() const override;
-  uint32_t GetServerProtocolVersion() const override;
-  absl::string_view GetServerProductVersion() const override;
-  uint32_t GetServerProcessId() const override;
+  FakeIPCClientFactory();
+  FakeIPCClientFactory(const FakeIPCClientFactory &) = delete;
+  FakeIPCClientFactory &operator=(const FakeIPCClientFactory &) = delete;
+
+  std::unique_ptr<IPCClientInterface> NewClient(
+      absl::string_view unused_name, absl::string_view path_name);
+  std::unique_ptr<IPCClientInterface> NewClient(absl::string_view unused_name);
+
+  // Returns a callable that delegates to NewClient on this fake.  The
+  // returned callable holds a non-owning pointer; *this must outlive it.
+  IPCClientFactory Bind();
+
+  // Knobs (configure before triggering code that creates a FakeIPCClient).
+  void SetConnection(bool connection) { connection_ = connection; }
+  void SetResult(bool result) { result_ = result; }
+  void SetMockResponse(absl::string_view response) { response_ = response; }
+  void SetServerProtocolVersion(uint32_t version) {
+    server_protocol_version_ = version;
+  }
+  void SetServerProductVersion(absl::string_view version) {
+    server_product_version_ = std::string(version);
+  }
+  void SetServerProcessId(uint32_t pid) { server_process_id_ = pid; }
+
+  // Observers (read after triggering code that calls NewClient/Call).
+  absl::string_view GetGeneratedRequest() const { return last_request_; }
+  int call_count() const { return call_count_; }
+  void ResetCallCount() { call_count_ = 0; }
+
+  // Hooks for FakeIPCClient.  Not intended for direct use by tests.
+  bool connection() const { return connection_; }
+  bool result() const { return result_; }
+  uint32_t server_protocol_version() const { return server_protocol_version_; }
+  absl::string_view server_product_version() const {
+    return server_product_version_;
+  }
+  uint32_t server_process_id() const { return server_process_id_; }
+  absl::string_view canned_response() const { return response_; }
+  void RecordCall(absl::string_view request);
+
+ private:
+  bool connection_ = false;
+  bool result_ = false;
+  uint32_t server_protocol_version_ = IPC_PROTOCOL_VERSION;
+  std::string server_product_version_;
+  uint32_t server_process_id_ = 0;
+  std::string response_;
+  std::string last_request_;
+  int call_count_ = 0;
+};
+
+class FakeIPCClient : public IPCClientInterface {
+ public:
+  explicit FakeIPCClient(FakeIPCClientFactory *factory) : factory_(factory) {}
+  FakeIPCClient(const FakeIPCClient &) = delete;
+  FakeIPCClient &operator=(const FakeIPCClient &) = delete;
+
+  bool Connected() const override { return factory_->connection(); }
+  uint32_t GetServerProtocolVersion() const override {
+    return factory_->server_protocol_version();
+  }
+  absl::string_view GetServerProductVersion() const override {
+    return factory_->server_product_version();
+  }
+  uint32_t GetServerProcessId() const override {
+    return factory_->server_process_id();
+  }
+  IPCErrorType GetLastIPCError() const override { return IPC_NO_ERROR; }
+
   bool Call(absl::string_view request, std::string *response,
             absl::Duration timeout) override;
 
-  IPCErrorType GetLastIPCError() const override { return IPC_NO_ERROR; }
-
-  void set_connection(const bool connection) { connected_ = connection; }
-  void set_result(const bool result) { result_ = result; }
-  void set_server_protocol_version(const uint32_t server_protocol_version) {
-    server_protocol_version_ = server_protocol_version;
-  }
-  void set_server_product_version(absl::string_view server_product_version) {
-    server_product_version_ = server_product_version;
-  }
-  void set_server_process_id(const uint32_t server_process_id) {
-    server_process_id_ = server_process_id;
-  }
-  void set_response(absl::string_view response) { response_ = response; }
-
  private:
-  IPCClientFactoryMock *caller_;
-  bool connected_;
-  uint32_t server_protocol_version_;
-  std::string server_product_version_;
-  uint32_t server_process_id_;
-  bool result_;
-  std::string response_;
-};
-
-class IPCClientFactoryMock : public IPCClientFactoryInterface {
- public:
-  IPCClientFactoryMock();
-  IPCClientFactoryMock(const IPCClientFactoryMock &) = delete;
-  IPCClientFactoryMock &operator=(const IPCClientFactoryMock &) = delete;
-
-  std::unique_ptr<IPCClientInterface> NewClient(
-      absl::string_view unused_name, absl::string_view path_name) override;
-
-  std::unique_ptr<IPCClientInterface> NewClient(
-      absl::string_view unused_name) override;
-
-  // This function is for unit tests.
-  absl::string_view GetGeneratedRequest() const;
-
-  // This function is for IPCClientMock.
-  void SetGeneratedRequest(absl::string_view request);
-
-  // This function is for unit tests.
-  void SetMockResponse(absl::string_view response);
-
-  // This function is for unit tests.
-  void SetConnection(bool connection);
-
-  // This function is for unit tests.
-  void SetResult(bool result);
-
-  // This function is for unit tests.
-  void SetServerProtocolVersion(uint32_t server_protocol_version);
-
-  // This function is for unit tests.
-  void SetServerProductVersion(absl::string_view server_product_version);
-
-  // This function is for unit tests.
-  void SetServerProcessId(uint32_t server_process_id);
-
- private:
-  std::unique_ptr<IPCClientMock> NewClientMock();
-
-  bool connection_;
-  bool result_;
-  uint32_t server_protocol_version_;
-  std::string server_product_version_;
-  uint32_t server_process_id_;
-  std::string request_;
-  std::string response_;
+  FakeIPCClientFactory *factory_;
 };
 
 }  // namespace mozc
