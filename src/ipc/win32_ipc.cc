@@ -36,7 +36,6 @@
 // clang-format on
 #include <wil/resource.h>
 
-#include <algorithm>
 #include <cstdint>
 #include <string>
 #include <utility>
@@ -46,8 +45,6 @@
 #include "absl/strings/string_view.h"
 #include "absl/time/time.h"
 #include "base/const.h"
-#include "base/cpu_stats.h"
-#include "base/singleton.h"
 #include "base/system_util.h"
 #include "base/util.h"
 #include "base/vlog.h"
@@ -66,12 +63,6 @@ constexpr bool kReadTypeACK = true;
 constexpr bool kReadTypeData = false;
 constexpr bool kSendTypeData = false;
 constexpr int kMaxSuccessiveConnectionFailureCount = 5;
-
-size_t GetNumberOfProcessors() {
-  // thread-safety is not required.
-  static size_t num = CPUStats().GetNumberOfProcessors();
-  return std::max<size_t>(num, 1);
-}
 
 // Least significant bit of OVERLAPPED::hEvent can be used for special
 // purpose against GetQueuedCompletionStatus API.
@@ -99,100 +90,50 @@ bool InitOverlapped(OVERLAPPED *overlapped, HANDLE wait_handle) {
   return true;
 }
 
-class IPCClientMutexBase {
- public:
-  explicit IPCClientMutexBase(absl::string_view ipc_channel_name) {
-    // Make a kernel mutex object so that multiple ipc connections are
-    // serialized here. In Windows, there is no useful way to serialize
-    // the multiple connections to the single-thread named pipe server.
-    // WaitForNamedPipe doesn't work for this propose as it just lets
-    // clients know that the connection becomes "available" right now.
-    // It doesn't mean that connection is available for the current
-    // thread. The "available" notification is sent to all waiting ipc
-    // clients at the same time and only one client gets the connection.
-    // This causes redundant and wasteful CreateFile calles.
-    std::string mutex_name =
-        absl::StrCat(kMutexPathPrefix, SystemUtil::GetUserSidAsString(), ".",
-                     ipc_channel_name, ".ipc");
-    std::wstring wmutex_name = Utf8ToWide(mutex_name);
-
-    wil::unique_hlocal_security_descriptor security_descriptor =
-        WinSandbox::MakeSecurityDescriptor(WinSandbox::kSharableMutex);
-    if (!security_descriptor) {
-      LOG(ERROR) << "Cannot make SecurityDescriptor";
-    }
-
-    SECURITY_ATTRIBUTES security_attributes = {
-        .nLength = sizeof(SECURITY_ATTRIBUTES),
-        .lpSecurityDescriptor = security_descriptor.get(),
-        .bInheritHandle = FALSE,
-    };
-    LPSECURITY_ATTRIBUTES security_attributes_ptr =
-        (security_descriptor ? &security_attributes : nullptr);
-
-    // http://msdn.microsoft.com/en-us/library/ms682411(VS.85).aspx:
-    // Two or more processes can call CreateMutex to create the same named
-    // mutex. The first process actually creates the mutex, and subsequent
-    // processes with sufficient access rights simply open a handle to
-    // the existing mutex. This enables multiple processes to get handles
-    // of the same mutex, while relieving the user of the responsibility
-    // of ensuring that the creating process is started first.
-    // When using this technique, you should set the
-    // bInitialOwner flag to FALSE; otherwise, it can be difficult to be
-    // certain which process has initial ownership.
-    ipc_mutex_.reset(
-        ::CreateMutex(security_attributes_ptr, FALSE, wmutex_name.c_str()));
-
-    const DWORD create_mutex_error = ::GetLastError();
-    if (ipc_mutex_.get() == nullptr) {
-      LOG(ERROR) << "CreateMutex failed: " << create_mutex_error;
-      return;
-    }
-  }
-
-  virtual ~IPCClientMutexBase() = default;
-
-  const wil::unique_mutex_nothrow &mutex() const { return ipc_mutex_; }
-
- private:
-  wil::unique_mutex_nothrow ipc_mutex_;
-};
-
-class ConverterClientMutex : public IPCClientMutexBase {
- public:
-  ConverterClientMutex() : IPCClientMutexBase("converter") {}
-  ConverterClientMutex(const ConverterClientMutex &) = delete;
-  ConverterClientMutex &operator=(const ConverterClientMutex &) = delete;
-};
-
-class RendererClientMutex : public IPCClientMutexBase {
- public:
-  RendererClientMutex() : IPCClientMutexBase("renderer") {}
-  RendererClientMutex(const RendererClientMutex &) = delete;
-  RendererClientMutex &operator=(const RendererClientMutex &) = delete;
-};
-
-class FallbackClientMutex : public IPCClientMutexBase {
- public:
-  FallbackClientMutex() : IPCClientMutexBase("fallback") {}
-  FallbackClientMutex(const FallbackClientMutex &) = delete;
-  FallbackClientMutex &operator=(const FallbackClientMutex &) = delete;
-};
-
-// In Mozc client, we should support different IPC channels (client-converter
-// and client-renderer) so we need to have different global mutexes to
-// serialize each client. Currently |ipc_name| starts with "session" and
-// "renderer" are expected.
-const wil::unique_mutex_nothrow &GetClientMutex(
-    absl::string_view ipc_name) {
+// Opens (or creates) the per-channel named kernel mutex used to serialize IPC
+// connection retries across competing client processes when the server has no
+// free pipe instance. The mutex name is keyed on (user SID, channel) so that
+// distinct IPC channels (converter vs. renderer) don't contend with each
+// other. The handle is local to the caller; the kernel object itself is
+// shared across processes via its name, so caching the handle is unnecessary.
+//
+// http://msdn.microsoft.com/en-us/library/ms682411(VS.85).aspx:
+// Two or more processes can call CreateMutex to create the same named mutex.
+// The first process actually creates the mutex, and subsequent processes with
+// sufficient access rights simply open a handle to the existing mutex.
+wil::unique_mutex_nothrow OpenClientMutex(absl::string_view ipc_name) {
+  absl::string_view channel = "fallback";
   if (ipc_name.starts_with("session")) {
-    return Singleton<ConverterClientMutex>::get()->mutex();
+    channel = "converter";
+  } else if (ipc_name.starts_with("renderer")) {
+    channel = "renderer";
+  } else {
+    LOG(WARNING) << "unexpected IPC name: " << ipc_name;
   }
-  if (ipc_name.starts_with("renderer")) {
-    return Singleton<RendererClientMutex>::get()->mutex();
+  std::wstring wmutex_name = Utf8ToWide(absl::StrCat(
+      kMutexPathPrefix, SystemUtil::GetUserSidAsString(), ".", channel,
+      ".ipc"));
+
+  wil::unique_hlocal_security_descriptor security_descriptor =
+      WinSandbox::MakeSecurityDescriptor(WinSandbox::kSharableMutex);
+  if (!security_descriptor) {
+    LOG(ERROR) << "Cannot make SecurityDescriptor";
   }
-  LOG(WARNING) << "unexpected IPC name: " << ipc_name;
-  return Singleton<FallbackClientMutex>::get()->mutex();
+  SECURITY_ATTRIBUTES security_attributes = {
+      .nLength = sizeof(SECURITY_ATTRIBUTES),
+      .lpSecurityDescriptor = security_descriptor.get(),
+      .bInheritHandle = FALSE,
+  };
+  LPSECURITY_ATTRIBUTES security_attributes_ptr =
+      (security_descriptor ? &security_attributes : nullptr);
+
+  wil::unique_mutex_nothrow mutex;
+  mutex.reset(
+      ::CreateMutex(security_attributes_ptr, FALSE, wmutex_name.c_str()));
+  if (!mutex) {
+    LOG(ERROR) << "CreateMutex failed: " << ::GetLastError();
+  }
+  return mutex;
 }
 
 uint32_t GetServerProcessIdImpl(HANDLE handle) {
@@ -645,34 +586,6 @@ void IPCClient::Init(absl::string_view name,
                      absl::string_view server_path) {
   last_ipc_error_ = IPC_NO_CONNECTION;
 
-  // We should change the mutex based on which IPC server we will talk with.
-  const wil::unique_mutex_nothrow &ipc_mutex = GetClientMutex(name);
-  wil::mutex_release_scope_exit mutex_releaser;
-
-  if (ipc_mutex.get() == nullptr) {
-    LOG(ERROR) << "IPC mutex is not available";
-  } else {
-    constexpr int kMutexTimeout = 10 * 1000;  // wait at most 10sec.
-    DWORD status;
-    mutex_releaser = ipc_mutex.acquire(&status, kMutexTimeout);
-    switch (status) {
-      case WAIT_TIMEOUT:
-        // TODO(taku): with suspend/resume, WaitForSingleObject may
-        // return WAIT_TIMEOUT. We have to consider the case
-        // in the future.
-        LOG(ERROR) << "IPC client was not available even after "
-                   << kMutexTimeout << " msec.";
-        break;
-      case WAIT_ABANDONED:
-        DLOG(INFO) << "mutex object was removed";
-        break;
-      case WAIT_OBJECT_0:
-        break;
-      default:
-        break;
-    }
-  }
-
   IPCPathManager *manager = IPCPathManager::GetIPCPathManager(name);
   if (manager == nullptr) {
     LOG(ERROR) << "IPCPathManager::GetIPCPathManager failed";
@@ -695,67 +608,93 @@ void IPCClient::Init(absl::string_view name,
     }
     std::wstring wserver_address = Utf8ToWide(server_address);
 
-    if (GetNumberOfProcessors() == 1) {
-      // When the code is running in single processor environment, sometimes
-      // IPC server has not finished the clean-up tasks for the previous IPC
-      // session here. So we intentionally call WaitNamedPipe API so that IPC
-      // server has a chance to complete clean-up tasks if necessary.
-      // NOTE: We cannot set 0 for the wait time because 0 has a special meaning
-      // as |NMPWAIT_USE_DEFAULT_WAIT|.
-      constexpr DWORD kMinWaitTimeForWaitNamedPipe = 1;
-      ::WaitNamedPipe(wserver_address.c_str(), kMinWaitTimeForWaitNamedPipe);
-    }
-
+    // Hot path: try CreateFile directly. On a named pipe it is fail-fast --
+    // it returns ERROR_PIPE_BUSY immediately (without blocking) when no
+    // instance is free. When an instance is available we connect in a single
+    // syscall and skip the cross-process mutex entirely.
     wil::unique_hfile new_handle(
         ::CreateFile(wserver_address.c_str(), GENERIC_READ | GENERIC_WRITE, 0,
                      nullptr, OPEN_EXISTING,
                      FILE_FLAG_OVERLAPPED | SECURITY_SQOS_PRESENT |
                          SECURITY_IDENTIFICATION | SECURITY_EFFECTIVE_ONLY,
                      nullptr));
-    const DWORD create_file_error = ::GetLastError();
-    if (new_handle) {
-      pipe_handle_ = std::move(new_handle);
-      MaybeDisableFileCompletionNotification(pipe_handle_.get());
-      // Set PIPE_READMODE_MESSAGE so that we can rely on ERROR_MORE_DATA.
-      // https://learn.microsoft.com/en-us/windows/win32/ipc/named-pipe-client
-      DWORD mode = PIPE_READMODE_MESSAGE;
-      ::SetNamedPipeHandleState(pipe_handle_.get(), &mode, nullptr, nullptr);
-      if (!manager->IsValidServer(GetServerProcessIdImpl(pipe_handle_.get()),
-                                  server_path)) {
-        LOG(ERROR) << "Connecting to invalid server";
-        last_ipc_error_ = IPC_INVALID_SERVER;
-        return;
+    DWORD create_file_error = ::GetLastError();
+
+    if (!new_handle && create_file_error == ERROR_PIPE_BUSY) {
+      // Cold path: the server has no free instance right now. Serialize the
+      // wait-and-retry across competing clients with a named kernel mutex so
+      // that WaitNamedPipe's broadcast wake-up doesn't stampede CreateFile.
+      wil::unique_mutex_nothrow ipc_mutex = OpenClientMutex(name);
+      wil::mutex_release_scope_exit mutex_releaser;
+      if (ipc_mutex) {
+        constexpr int kMutexTimeout = 10 * 1000;  // wait at most 10sec.
+        DWORD status;
+        mutex_releaser = ipc_mutex.acquire(&status, kMutexTimeout);
+        if (status == WAIT_TIMEOUT) {
+          // TODO(taku): with suspend/resume, WaitForSingleObject may
+          // return WAIT_TIMEOUT. We have to consider the case
+          // in the future.
+          LOG(ERROR) << "IPC client was not available even after "
+                     << kMutexTimeout << " msec.";
+        } else if (status == WAIT_ABANDONED) {
+          DLOG(INFO) << "mutex object was removed";
+        }
+      } else {
+        LOG(ERROR) << "IPC mutex is not available";
       }
 
-      last_ipc_error_ = IPC_NO_ERROR;
-      connected_ = true;
-      return;
+      // wait for 10 second until server is ready
+      // TODO(taku): control the timeout via flag.
+#ifdef DEBUG
+      constexpr int kNamedPipeTimeout = 100000;  // 100 sec
+#else   // DEBUG
+      constexpr int kNamedPipeTimeout = 10000;  // 10 sec
+#endif  // DEBUG
+      DLOG(ERROR) << "Server is busy. waiting for " << kNamedPipeTimeout
+                  << " msec";
+      if (!::WaitNamedPipe(wserver_address.c_str(), kNamedPipeTimeout)) {
+        const DWORD wait_named_pipe_error = ::GetLastError();
+        LOG(ERROR) << "WaitNamedPipe failed: " << wait_named_pipe_error;
+        if ((trial + 1) == kMaxTrial) {
+          last_ipc_error_ = IPC_TIMEOUT_ERROR;
+          return;
+        }
+        continue;  // go 2nd trial
+      }
+
+      // WaitNamedPipe signaled an available instance; retry CreateFile while
+      // still holding the mutex so contending clients don't race us.
+      new_handle.reset(
+          ::CreateFile(wserver_address.c_str(), GENERIC_READ | GENERIC_WRITE,
+                       0, nullptr, OPEN_EXISTING,
+                       FILE_FLAG_OVERLAPPED | SECURITY_SQOS_PRESENT |
+                           SECURITY_IDENTIFICATION | SECURITY_EFFECTIVE_ONLY,
+                       nullptr));
+      create_file_error = ::GetLastError();
     }
 
-    if (ERROR_PIPE_BUSY != create_file_error) {
+    if (!new_handle) {
       LOG(ERROR) << "Server is not running: " << create_file_error;
       manager->Clear();
       continue;
     }
 
-    // wait for 10 second until server is ready
-    // TODO(taku): control the timeout via flag.
-#ifdef DEBUG
-    constexpr int kNamedPipeTimeout = 100000;  // 100 sec
-#else                                          // DEBUG
-    constexpr int kNamedPipeTimeout = 10000;  // 10 sec
-#endif                                         // DEBUG
-    DLOG(ERROR) << "Server is busy. waiting for " << kNamedPipeTimeout
-                << " msec";
-    if (!::WaitNamedPipe(wserver_address.c_str(), kNamedPipeTimeout)) {
-      const DWORD wait_named_pipe_error = ::GetLastError();
-      LOG(ERROR) << "WaitNamedPipe failed: " << wait_named_pipe_error;
-      if ((trial + 1) == kMaxTrial) {
-        last_ipc_error_ = IPC_TIMEOUT_ERROR;
-        return;
-      }
-      continue;  // go 2nd trial
+    pipe_handle_ = std::move(new_handle);
+    MaybeDisableFileCompletionNotification(pipe_handle_.get());
+    // Set PIPE_READMODE_MESSAGE so that we can rely on ERROR_MORE_DATA.
+    // https://learn.microsoft.com/en-us/windows/win32/ipc/named-pipe-client
+    DWORD mode = PIPE_READMODE_MESSAGE;
+    ::SetNamedPipeHandleState(pipe_handle_.get(), &mode, nullptr, nullptr);
+    if (!manager->IsValidServer(GetServerProcessIdImpl(pipe_handle_.get()),
+                                server_path)) {
+      LOG(ERROR) << "Connecting to invalid server";
+      last_ipc_error_ = IPC_INVALID_SERVER;
+      return;
     }
+
+    last_ipc_error_ = IPC_NO_ERROR;
+    connected_ = true;
+    return;
   }
 }
 
