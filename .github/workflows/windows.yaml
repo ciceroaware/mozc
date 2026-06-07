@@ -203,7 +203,28 @@ jobs:
         env:
           ANDROID_NDK_HOME: ""
         run: |
-          bazelisk test ... -c dbg --build_tests_only
+          bazelisk test ... -c dbg --build_tests_only --test_output=errors --test_summary=detailed
+
+      # Preserve the full, untruncated test.log / test.xml for every failing
+      # (or flaky-retried) test so flakes can be diagnosed after the run.
+      - name: Collect test logs
+        if: failure()
+        shell: cmd
+        working-directory: .\src
+        run: |
+          for /f "delims=" %%i in ('bazelisk info bazel-testlogs -c dbg') do set "TESTLOGS=%%i"
+          robocopy "%TESTLOGS%" "%GITHUB_WORKSPACE%\test_logs" test.log test.xml /S
+          rem robocopy uses exit codes 0-7 for success; only 8+ is a real error.
+          if %ERRORLEVEL% GEQ 8 exit /b 1
+          exit /b 0
+
+      - name: Upload test logs
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: test-logs-${{ runner.os }}
+          path: test_logs
+          if-no-files-found: ignore
 
   # actions/cache works without this job, but having this would increase the likelihood of cache hit
   # in other jobs. Another approach would be to use "needs:".
