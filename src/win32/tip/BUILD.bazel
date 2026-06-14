@@ -652,14 +652,9 @@ mozc_cc_library(
 )
 
 mozc_cc_library(
-    # TODO(yuryu): Fix cyclic dependency between tip_ui_handler*.cc.
     name = "tip_ui_handler_impl",
     srcs = [
         "tip_ui_handler.cc",
-        "tip_ui_handler_conventional.cc",
-    ],
-    hdrs = [
-        "tip_ui_handler_conventional.h",
     ],
     features = features_gdi(),
     tags = MOZC_TAGS.WIN_ONLY,
