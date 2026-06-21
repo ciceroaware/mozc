@@ -57,6 +57,7 @@ mozc_win32_cc_prod_binary(
     ],
     deps = [
         ":cache_service_manager",
+        ":cache_service_rpc_server",
         ":mozc_cache_service_resources",
         "//base:system_util",
         "//base/win32:wide_char",
@@ -96,6 +97,25 @@ mozc_cc_library(
         "//bazel/win32:crypt32",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/types:span",
+    ],
+)
+
+mozc_cc_library(
+    name = "cache_service_rpc_server",
+    srcs = ["cache_service_rpc_server.cc"],
+    hdrs = ["cache_service_rpc_server.h"],
+    tags = MOZC_TAGS.WIN_ONLY,
+    target_compatible_with = ["@platforms//os:windows"],
+    deps = [
+        "//base:system_util",
+        "//base/win32:win_sandbox",
+        "//bazel/win32:advapi32",
+        "//bazel/win32:rpcrt4",
+        "//ipc/win:rpc_interface",
+        "//ipc/win:rpc_server_stubs",
+        "@com_google_absl//absl/log",
+        "@com_google_absl//absl/strings",
+        "@com_microsoft_wil//:wil",
     ],
 )
 

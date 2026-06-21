@@ -32,6 +32,7 @@
 #include <aclapi.h>
 #include <atlsecurity.h>
 #include <sddl.h>
+#include <userenv.h>
 #include <wil/resource.h>
 #include <windows.h>
 // clang-format off
@@ -126,17 +127,10 @@ wil::unique_hlocal_string_secure GetTokenPrimaryGroupSidStringW(
   return nullptr;
 }
 
-bool GetUserSid(std::wstring& token_user_sid,
-                std::wstring& token_primary_group_sid) {
-  wil::unique_process_handle token = OpenEffectiveToken(TOKEN_QUERY);
-  if (!token) {
-    LOG(ERROR) << "OpenEffectiveToken failed " << ::GetLastError();
-    return false;
-  }
-
+bool GetUserSidFromToken(HANDLE token, std::wstring& token_user_sid,
+                         std::wstring& token_primary_group_sid) {
   // Get token user SID
-  wil::unique_hlocal_string_secure sid_string =
-      GetTokenUserSidStringW(token.get());
+  wil::unique_hlocal_string_secure sid_string = GetTokenUserSidStringW(token);
   if (!sid_string) {
     LOG(ERROR) << "GetTokenUserSidStringW failed " << ::GetLastError();
     return false;
@@ -144,7 +138,7 @@ bool GetUserSid(std::wstring& token_user_sid,
   token_user_sid = sid_string.get();
 
   // Get token primary group SID
-  sid_string = GetTokenPrimaryGroupSidStringW(token.get());
+  sid_string = GetTokenPrimaryGroupSidStringW(token);
   if (!sid_string) {
     LOG(ERROR) << "GetTokenPrimaryGroupSidStringW failed " << ::GetLastError();
     return false;
@@ -153,6 +147,18 @@ bool GetUserSid(std::wstring& token_user_sid,
 
   return true;
 }
+
+bool GetUserSid(std::wstring& token_user_sid,
+                std::wstring& token_primary_group_sid) {
+  wil::unique_process_handle token = OpenEffectiveToken(TOKEN_QUERY);
+  if (!token) {
+    LOG(ERROR) << "OpenEffectiveToken failed " << ::GetLastError();
+    return false;
+  }
+  return GetUserSidFromToken(token.get(), token_user_sid,
+                             token_primary_group_sid);
+}
+
 
 std::wstring Allow(std::wstring_view access_right,
                    std::wstring_view account_sid) {
@@ -407,6 +413,29 @@ wil::unique_hlocal_security_descriptor WinSandbox::MakeSecurityDescriptor(
   return self_relative_desc;
 }
 
+wil::unique_hlocal_security_descriptor WinSandbox::MakeSecurityDescriptor(
+    ObjectSecurityType shareble_object_type, HANDLE token) {
+  std::wstring token_user_sid;
+  std::wstring token_primary_group_sid;
+  if (!GetUserSidFromToken(token, token_user_sid, token_primary_group_sid)) {
+    return nullptr;
+  }
+
+  const std::wstring sddl =
+      GetSDDL(shareble_object_type, token_user_sid, token_primary_group_sid);
+
+  wil::unique_hlocal_security_descriptor self_relative_desc;
+  if (!::ConvertStringSecurityDescriptorToSecurityDescriptorW(
+          sddl.c_str(), SDDL_REVISION_1, self_relative_desc.put(), nullptr)) {
+    LOG(ERROR)
+        << "ConvertStringSecurityDescriptorToSecurityDescriptorW failed: "
+        << ::GetLastError();
+    return nullptr;
+  }
+
+  return self_relative_desc;
+}
+
 bool WinSandbox::AddKnownSidToKernelObject(HANDLE object, const SID* known_sid,
                                            DWORD inheritance_flag,
                                            ACCESS_MASK access_mask) {
@@ -597,31 +626,50 @@ class StartupInfo {
   bool attribute_list_initialized_ = false;
 };
 
-bool SpawnSandboxedProcessImpl(std::wstring command_line,
-                               const WinSandbox::SecurityInfo& info,
-                               DWORD* pid) {
-  wil::unique_process_handle process_token;
-  if (!::OpenProcessToken(::GetCurrentProcess(), TOKEN_ALL_ACCESS,
-                          process_token.put())) {
-    return false;
-  }
+// Spawns |command_line| using restricted/low-integrity tokens derived from
+// |effective_token| (a primary token). If |environment| is non-null it is used
+// as the child's environment block (and must be a Unicode block); otherwise the
+// caller's environment is inherited.
+bool SpawnSandboxedProcessImpl(std::wstring command_line, HANDLE effective_token,
+                               LPVOID environment,
+                               const WinSandbox::SecurityInfo& info, DWORD* pid,
+                               DWORD* error_code, int* fail_stage) {
+  const auto fail = [error_code, fail_stage](DWORD code,
+                                             WinSandbox::SpawnFailureStage s) {
+    if (error_code != nullptr) {
+      *error_code = code;
+    }
+    if (fail_stage != nullptr) {
+      *fail_stage = s;
+    }
+  };
+  fail(ERROR_SUCCESS, WinSandbox::kSpawnStageNone);
 
   wil::unique_process_handle primary_token =
       WinSandbox::GetRestrictedTokenHandle(
-          process_token.get(), info.primary_level, info.integrity_level);
+          effective_token, info.primary_level, info.integrity_level);
   if (!primary_token) {
+    fail(::GetLastError(), WinSandbox::kSpawnStagePrimaryToken);
     return false;
   }
 
   wil::unique_process_handle impersonation_token =
       WinSandbox::GetRestrictedTokenHandleForImpersonation(
-          process_token.get(), info.impersonation_level, info.integrity_level);
+          effective_token, info.impersonation_level, info.integrity_level);
   if (!impersonation_token) {
+    fail(::GetLastError(), WinSandbox::kSpawnStageImpersonationToken);
     return false;
   }
 
+  // Build the impersonation-token DACL from |effective_token|'s user, not the
+  // calling process's. These usually match (the launcher runs as the user), but
+  // when a service launches on behalf of another user (SpawnSandboxedProcessAs)
+  // the calling process is the service (e.g. LocalSystem); using its SID would
+  // produce a DACL that excludes the actual user, so the child could not even
+  // OpenThreadToken its own thread token (GetRunLevel would then DENY).
   wil::unique_hlocal_security_descriptor security_descriptor =
-      WinSandbox::MakeSecurityDescriptor(WinSandbox::kIPCServerProcess);
+      WinSandbox::MakeSecurityDescriptor(WinSandbox::kIPCServerProcess,
+                                         effective_token);
   if (security_descriptor) {
     // Override the impersonation thread token's DACL to avoid http://b/1728895
     // On Windows Server, the objects created by a member of
@@ -640,6 +688,7 @@ bool SpawnSandboxedProcessImpl(std::wstring command_line,
                                    security_descriptor.get())) {
       const DWORD last_error = ::GetLastError();
       DLOG(ERROR) << "SetKernelObjectSecurity failed. Error: " << last_error;
+      fail(last_error, WinSandbox::kSpawnStageThreadTokenDacl);
       return false;
     }
   }
@@ -647,10 +696,14 @@ bool SpawnSandboxedProcessImpl(std::wstring command_line,
   // CREATE_SUSPENDED is still needed for us to call ::SetThreadToken before
   // starting its main thread.
   DWORD creation_flags = info.creation_flags | CREATE_SUSPENDED;
+  if (environment != nullptr) {
+    creation_flags |= CREATE_UNICODE_ENVIRONMENT;
+  }
 
   StartupInfo startup_info_;
   if (info.use_locked_down_job) {
     if (!startup_info_.SetJob(info.allow_ui_operation)) {
+      fail(::GetLastError(), WinSandbox::kSpawnStageJob);
       return false;
     }
     // Windows 8 and later allow nested jobs, hence CREATE_BREAKAWAY_FROM_JOB is
@@ -665,6 +718,13 @@ bool SpawnSandboxedProcessImpl(std::wstring command_line,
         creation_flags |= CREATE_BREAKAWAY_FROM_JOB;
       }
     }
+  }
+
+  if (!info.desktop_name.empty()) {
+    // lpDesktop is read-only to CreateProcessAsUser, and |info| outlives the
+    // call, so pointing at its buffer is safe.
+    startup_info_.AsPtr()->lpDesktop =
+        const_cast<wchar_t*>(info.desktop_name.c_str());
   }
 
   const wchar_t* startup_directory =
@@ -686,11 +746,12 @@ bool SpawnSandboxedProcessImpl(std::wstring command_line,
                              security_attributes_ptr, nullptr,
                              FALSE,  // Do not inherit handles.
                              creation_flags,
-                             nullptr,  // Use the environment of the caller.
+                             environment,  // null => environment of the caller.
                              startup_directory, startup_info_.AsPtr(),
                              process_info.reset_and_addressof())) {
     const DWORD last_error = ::GetLastError();
     DLOG(ERROR) << "CreateProcessAsUser failed. Error: " << last_error;
+    fail(last_error, WinSandbox::kSpawnStageCreateProcess);
     return false;
   }
 
@@ -699,6 +760,7 @@ bool SpawnSandboxedProcessImpl(std::wstring command_line,
   if (!::SetThreadToken(&process_info.hThread, impersonation_token.get())) {
     const DWORD last_error = ::GetLastError();
     DLOG(ERROR) << "SetThreadToken failed. Error: " << last_error;
+    fail(last_error, WinSandbox::kSpawnStageSetThreadToken);
     ::TerminateProcess(process_info.hProcess, 0);
     return false;
   }
@@ -729,7 +791,45 @@ bool WinSandbox::SpawnSandboxedProcess(absl::string_view path,
     StrAppendW(&wpath, L" ", win32::Utf8ToWide(arg));
   }
 
-  return SpawnSandboxedProcessImpl(std::move(wpath), info, pid);
+  wil::unique_process_handle process_token;
+  if (!::OpenProcessToken(::GetCurrentProcess(), TOKEN_ALL_ACCESS,
+                          process_token.put())) {
+    return false;
+  }
+
+  return SpawnSandboxedProcessImpl(std::move(wpath), process_token.get(),
+                                   /*environment=*/nullptr, info, pid,
+                                   /*error_code=*/nullptr,
+                                   /*fail_stage=*/nullptr);
+}
+
+bool WinSandbox::SpawnSandboxedProcessAs(absl::string_view path,
+                                         absl::string_view arg,
+                                         HANDLE effective_token,
+                                         const SecurityInfo& info, DWORD* pid,
+                                         DWORD* error_code, int* fail_stage) {
+  std::wstring wpath = StrCatW(L"\"", win32::Utf8ToWide(path), L"\"");
+  if (!arg.empty()) {
+    StrAppendW(&wpath, L" ", win32::Utf8ToWide(arg));
+  }
+
+  // Build the target user's environment block so user-specific variables
+  // (USERPROFILE, APPDATA, ...) resolve to the launching user instead of the
+  // caller (e.g. the service account). Non-fatal if it fails: fall back to the
+  // caller's environment.
+  LPVOID environment = nullptr;
+  const bool have_environment =
+      ::CreateEnvironmentBlock(&environment, effective_token, FALSE);
+
+  const bool result = SpawnSandboxedProcessImpl(
+      std::move(wpath), effective_token,
+      have_environment ? environment : nullptr, info, pid, error_code,
+      fail_stage);
+
+  if (have_environment && environment != nullptr) {
+    ::DestroyEnvironmentBlock(environment);
+  }
+  return result;
 }
 
 // Utility functions and classes for GetRestrictionInfo

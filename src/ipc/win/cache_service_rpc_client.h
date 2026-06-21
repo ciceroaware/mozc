@@ -1,0 +1,59 @@
+// Copyright 2010-2021, Google Inc.
+// All rights reserved.
+//
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions are
+// met:
+//
+//     * Redistributions of source code must retain the above copyright
+// notice, this list of conditions and the following disclaimer.
+//     * Redistributions in binary form must reproduce the above
+// copyright notice, this list of conditions and the following disclaimer
+// in the documentation and/or other materials provided with the
+// distribution.
+//     * Neither the name of Google Inc. nor the names of its
+// contributors may be used to endorse or promote products derived from
+// this software without specific prior written permission.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+// "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+// LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+// A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+// OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+// SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+// LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+// DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+// THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+// (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+// Client for the Mozc cache-service MSRPC interface (ncalrpc). It binds to the
+// predictable endpoint and authenticates the server via mutual authentication
+// against the service principal ("NT SERVICE\\<ServiceName>"), so a same-user
+// process squatting the endpoint cannot impersonate the service. The binding
+// also grants impersonation (RPC_C_IMP_LEVEL_IMPERSONATE) so the service can
+// RpcImpersonateClient and act on the caller's behalf (e.g. the launch helper).
+
+#ifndef MOZC_IPC_WIN_CACHE_SERVICE_RPC_CLIENT_H_
+#define MOZC_IPC_WIN_CACHE_SERVICE_RPC_CLIENT_H_
+
+#ifdef _WIN32
+
+namespace mozc::ipc::win {
+
+class CacheServiceRpcClient {
+ public:
+  CacheServiceRpcClient() = delete;
+
+  // Asks the cache service to launch mozc_server.exe in the caller's session.
+  // Returns true if the request was delivered and the service reported success.
+  static bool LaunchServer();
+
+  // Same as LaunchServer() but for mozc_renderer.exe.
+  static bool LaunchRenderer();
+};
+
+}  // namespace mozc::ipc::win
+
+#endif  // _WIN32
+#endif  // MOZC_IPC_WIN_CACHE_SERVICE_RPC_CLIENT_H_

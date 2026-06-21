@@ -1,0 +1,150 @@
+# Copyright 2010-2021, Google Inc.
+# All rights reserved.
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are
+# met:
+#
+#     * Redistributions of source code must retain the above copyright
+# notice, this list of conditions and the following disclaimer.
+#     * Redistributions in binary form must reproduce the above
+# copyright notice, this list of conditions and the following disclaimer
+# in the documentation and/or other materials provided with the
+# distribution.
+#     * Neither the name of Google Inc. nor the names of its
+# contributors may be used to endorse or promote products derived from
+# this software without specific prior written permission.
+#
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+# A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+# OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+# LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+# DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+# THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+# MIDL-free MSRPC (ncalrpc) transport for Windows, vendored from the
+# win_ipc_initiator project. The single interface method (ProcessIpcRequest:
+# opaque bytes in/out plus optional typed handle arrays) is hosted by
+# mozc_cache_service.exe;
+#
+# The NDR64 (x64) and DCE (x86) format tables in rpc_ndr64_format.h /
+# rpc_dce_format.h are MIDL golden output and must not be hand-edited.
+
+load(
+    "//:build_defs.bzl",
+    "MOZC_TAGS",
+    "mozc_cc_binary",
+    "mozc_cc_library",
+)
+
+package(default_visibility = ["//visibility:private"])
+
+# Shared interface identity / constants (UUID, endpoint, message ids, handle
+# wire-type bytes). Client-facing; safe to depend on from either side.
+mozc_cc_library(
+    name = "rpc_interface",
+    hdrs = ["rpc_interface.h"],
+    tags = MOZC_TAGS.WIN_ONLY,
+    target_compatible_with = ["@platforms//os:windows"],
+    visibility = [
+        "//client:__subpackages__",
+        "//ipc:__subpackages__",
+        "//win32:__subpackages__",
+    ],
+)
+
+# Server-side hand-authored stub. ProcessIpcRequest is referenced here as the
+# manager routine and must be provided by the host application (along with the
+# MIDL_user_allocate / MIDL_user_free hooks). This is a single dual-syntax server
+# (NDR64 + DCE NDR) so one x64 binary serves both x64 and x86 clients; it is
+# x64-only by design (a 32-bit process cannot advertise NDR64), and compiling it
+# for x86 is a hard #error. The cache service is the only consumer and is x64.
+mozc_cc_library(
+    name = "rpc_server_stubs",
+    srcs = [
+        "rpc_dual_server.cc",
+    ],
+    hdrs = [
+        "rpc_client_stub.h",
+        "rpc_dce_format_x64.h",
+        "rpc_ndr64_format.h",
+        "rpc_server_stub.h",
+    ],
+    tags = MOZC_TAGS.WIN_ONLY,
+    target_compatible_with = ["@platforms//os:windows"],
+    visibility = [
+        "//ipc:__subpackages__",
+        "//win32:__subpackages__",
+    ],
+    deps = ["//bazel/win32:rpcrt4"],
+)
+
+# Client-side hand-authored stubs. These TUs define the ProcessIpcRequest entry
+# point (NdrClientCall3 on x64, NdrClientCall4 on x86), so they must not be
+# linked into the same binary as :rpc_server_stubs.
+mozc_cc_library(
+    name = "rpc_client_stubs",
+    srcs = [
+        "rpc_dce_stub.cc",
+        "rpc_ndr64_stub.cc",
+    ],
+    hdrs = [
+        "rpc_client_stub.h",
+        "rpc_dce_format.h",
+        "rpc_ndr64_format.h",
+    ],
+    tags = MOZC_TAGS.WIN_ONLY,
+    target_compatible_with = ["@platforms//os:windows"],
+    visibility = [
+        "//client:__subpackages__",
+        "//ipc:__subpackages__",
+        "//win32:__subpackages__",
+    ],
+    deps = ["//bazel/win32:rpcrt4"],
+)
+
+# Authenticated client for the cache-service interface. Binds the predictable
+# endpoint, authenticates the server via mutual auth against the service
+# principal, and exposes the launch helpers. Defines the MIDL allocator hooks
+# required by :rpc_client_stubs, so it must be the (only) provider of them in a
+# client binary.
+mozc_cc_library(
+    name = "cache_service_rpc_client",
+    srcs = ["cache_service_rpc_client.cc"],
+    hdrs = ["cache_service_rpc_client.h"],
+    tags = MOZC_TAGS.WIN_ONLY,
+    target_compatible_with = ["@platforms//os:windows"],
+    visibility = [
+        "//client:__subpackages__",
+        "//renderer:__subpackages__",
+        "//win32:__subpackages__",
+    ],
+    deps = [
+        ":rpc_client_stubs",
+        ":rpc_interface",
+        "//bazel/win32:rpcrt4",
+        "@com_google_absl//absl/log",
+    ],
+)
+
+# Developer-only Phase C probe (not shipped). Drives the authenticated client
+# against the live cache service to launch mozc_server / mozc_renderer.
+mozc_cc_binary(
+    name = "cache_service_rpc_probe",
+    srcs = ["cache_service_rpc_probe_main.cc"],
+    tags = MOZC_TAGS.WIN_ONLY,
+    target_compatible_with = ["@platforms//os:windows"],
+    deps = [
+        ":cache_service_rpc_client",
+        ":rpc_client_stubs",
+        ":rpc_interface",
+        "//base:const",
+        "//bazel/win32:rpcrt4",
+        "//bazel/win32:secur32",
+    ],
+)

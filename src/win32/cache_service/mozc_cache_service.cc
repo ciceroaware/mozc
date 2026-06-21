@@ -45,6 +45,7 @@
 #include "base/win32/wide_char.h"
 #include "base/win32/winmain.h"  // use WinMain
 #include "win32/cache_service/cache_service_manager.h"
+#include "win32/cache_service/cache_service_rpc_server.h"
 
 namespace mozc::win32 {
 namespace {
@@ -190,6 +191,17 @@ VOID WINAPI ServiceMain(DWORD dwArgc, LPTSTR* lpszArgv) {
 
   service_status.dwCurrentState = SERVICE_RUNNING;
   ::SetServiceStatus(service_status_handle, &service_status);
+
+  // Start the experimental MSRPC server (launch helper, etc.). Failure is
+  // non-fatal: the cache service still performs its memory-locking duty. The
+  // destructor stops listening on every return path below.
+  // TODO(yukawa): the service currently still exits on low memory (below),
+  // which also tears down this RPC server. Decide whether the service should
+  // stay resident purely to serve RPC. See RPC_DESIGN.md.
+  CacheServiceRpcServer rpc_server;
+  if (!rpc_server.Start()) {
+    LOG_WIN32_ERROR(L"CacheServiceRpcServer::Start failed.");
+  }
 
   if (!CacheServiceManager::HasEnoughMemory()) {
     STOP_SERVICE_AND_EXIT_FUNCTION();

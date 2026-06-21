@@ -107,6 +107,7 @@ mozc_cc_library(
         windows = [
             "//base/win32:wide_char",
             "//base/win32:win_sandbox",
+            "//ipc/win:cache_service_rpc_client",
         ],
     ),
 )

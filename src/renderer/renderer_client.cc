@@ -62,6 +62,7 @@
 
 #ifdef _WIN32
 #include "base/win32/win_sandbox.h"
+#include "ipc/win/cache_service_rpc_client.h"
 #endif  // _WIN32
 
 namespace mozc {
@@ -231,18 +232,33 @@ class RendererLauncher : public RendererLauncherInterface {
 #ifdef _WIN32
     DWORD pid = 0;
 
-    WinSandbox::SecurityInfo info;
-    info.primary_level = WinSandbox::USER_INTERACTIVE;
-    info.impersonation_level = WinSandbox::USER_RESTRICTED_SAME_ACCESS;
-    info.integrity_level = WinSandbox::INTEGRITY_LEVEL_LOW;
-    info.use_locked_down_job = true;
-    info.allow_ui_operation = true;  // skip UI protection
-    info.in_system_dir = true;  // use system dir not to lock current directory
-    info.creation_flags = CREATE_DEFAULT_ERROR_MODE;
+    // Primary path: ask the cache service - a persistent, auto-start LocalSystem
+    // service - to launch the renderer in our session via its MSRPC launch
+    // helper. The service spawns the child with the same restricted,
+    // low-integrity profile we would use below, and it works even when this
+    // process is too sandboxed (AppContainer / low IL) to CreateProcess across
+    // the necessary boundaries itself. The helper returns no pid, so |pid| stays
+    // 0 and we wait on the readiness event only (see below).
+    bool result = ipc::win::CacheServiceRpcClient::LaunchRenderer();
 
-    // start renderer process
-    const bool result =
-        WinSandbox::SpawnSandboxedProcess(path_, "", info, &pid);
+    if (!result) {
+      // Fallback to the original in-process launch when the cache service is
+      // unavailable (not installed, stopped, or a dev build without it).
+      LOG(WARNING) << "CacheServiceRpcClient::LaunchRenderer failed; falling "
+                      "back to in-process WinSandbox::SpawnSandboxedProcess";
+      WinSandbox::SecurityInfo info;
+      info.primary_level = WinSandbox::USER_INTERACTIVE;
+      info.impersonation_level = WinSandbox::USER_RESTRICTED_SAME_ACCESS;
+      info.integrity_level = WinSandbox::INTEGRITY_LEVEL_LOW;
+      info.use_locked_down_job = true;
+      info.allow_ui_operation = true;  // skip UI protection
+      info.in_system_dir =
+          true;  // use system dir not to lock current directory
+      info.creation_flags = CREATE_DEFAULT_ERROR_MODE;
+
+      // start renderer process
+      result = WinSandbox::SpawnSandboxedProcess(path_, "", info, &pid);
+    }
 #elif defined(__APPLE__)  // _WIN32
     // Start renderer process by using launch_msg API.
     pid_t pid = 0;
@@ -260,7 +276,16 @@ class RendererLauncher : public RendererLauncherInterface {
     }
 
     if (listener_is_available) {
-      const int ret = listener.WaitEventOrProcess(kRendererWaitTimeout, pid);
+      // With a known child pid (the in-process launch paths) we watch both the
+      // readiness event and the process handle, so an early crash is detected
+      // promptly. The cache-service launch returns no pid (|pid| == 0); since
+      // WaitEventOrProcess treats pid 0 as an already-dead process, wait on the
+      // readiness event alone in that case.
+      const int ret =
+          (pid != 0) ? listener.WaitEventOrProcess(kRendererWaitTimeout, pid)
+                     : (listener.Wait(kRendererWaitTimeout)
+                            ? static_cast<int>(NamedEventListener::EVENT_SIGNALED)
+                            : static_cast<int>(NamedEventListener::TIMEOUT));
       switch (ret) {
         case NamedEventListener::TIMEOUT:
           LOG(ERROR) << "seems that mozc_renderer is not ready within "

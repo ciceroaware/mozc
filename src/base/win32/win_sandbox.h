@@ -135,6 +135,13 @@ class WinSandbox {
   static wil::unique_hlocal_security_descriptor MakeSecurityDescriptor(
       ObjectSecurityType shareble_object_type);
 
+  // Variant whose ACEs reference |token|'s user / primary-group SIDs instead of
+  // the calling thread/process's. Use this when one security context (e.g. a
+  // LocalSystem service) must prepare an object that has to be accessible to a
+  // different user (e.g. the client a sandboxed child is launched for).
+  static wil::unique_hlocal_security_descriptor MakeSecurityDescriptor(
+      ObjectSecurityType shareble_object_type, HANDLE token);
+
   // Adds an ACE represented by |known_sid| and |access| to the dacl of the
   // kernel object referenced by |object|. |inheritance_flag| is a set of bit
   // flags that determines whether other containers or objects can inherit the
@@ -154,6 +161,12 @@ class WinSandbox {
     bool use_locked_down_job;
     bool allow_ui_operation;
     bool in_system_dir;
+    // If non-empty, sets STARTUPINFO::lpDesktop for the child process, e.g.
+    // L"WinSta0\\Default" to target the interactive window station/desktop when
+    // launching a GUI process such as mozc_renderer.exe (notably across
+    // sessions). If empty, lpDesktop is left null and the child inherits the
+    // default desktop.
+    std::wstring desktop_name;
   };
 
   // Spawn a process specified by path as the specified integrity level and job
@@ -163,6 +176,38 @@ class WinSandbox {
   static bool SpawnSandboxedProcess(absl::string_view path,
                                     absl::string_view arg,
                                     const SecurityInfo& info, DWORD* pid);
+
+  // Variant of SpawnSandboxedProcess that derives the restricted, low-integrity
+  // tokens from |effective_token| instead of the current process token. Use
+  // this to launch a child on behalf of another user from a different security
+  // context, e.g. a service launching mozc_server.exe / mozc_renderer.exe after
+  // impersonating an RPC client. |effective_token| must be a primary token
+  // (convert an impersonation token with DuplicateTokenEx/TokenPrimary first).
+  // The child receives an environment block built from |effective_token| so
+  // user-specific variables (USERPROFILE, APPDATA, ...) resolve to the launching
+  // user rather than the caller's account.
+  // Return true if the process is successfully launched; if pid is specified,
+  // pid of the child process is set.
+  // |error_code|, if non-null, receives the Win32 error from the failing step
+  // when the launch fails (0 on success), so callers (e.g. a remote RPC client)
+  // can surface a precise reason instead of a generic failure. |fail_stage|, if
+  // non-null, receives a small integer identifying which step failed (see
+  // SpawnFailureStage), 0 on success.
+  enum SpawnFailureStage {
+    kSpawnStageNone = 0,
+    kSpawnStagePrimaryToken = 1,
+    kSpawnStageImpersonationToken = 2,
+    kSpawnStageThreadTokenDacl = 3,
+    kSpawnStageJob = 4,
+    kSpawnStageCreateProcess = 5,
+    kSpawnStageSetThreadToken = 6,
+  };
+  static bool SpawnSandboxedProcessAs(absl::string_view path,
+                                      absl::string_view arg,
+                                      HANDLE effective_token,
+                                      const SecurityInfo& info, DWORD* pid,
+                                      DWORD* error_code = nullptr,
+                                      int* fail_stage = nullptr);
 
   // Following three methods returns corresponding list of SID or LUID for
   // CreateRestrictedToken API, depending on given |effective_token| and

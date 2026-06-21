@@ -57,6 +57,7 @@
 #include <windows.h>
 
 #include "base/win32/win_sandbox.h"
+#include "ipc/win/cache_service_rpc_client.h"
 #else  // _WIN32
 #include <unistd.h>
 #endif  // _WIN32
@@ -126,21 +127,42 @@ bool ServerLauncher::StartServer(ClientInterface *client) {
 
   size_t pid = 0;
 #ifdef _WIN32
-  mozc::WinSandbox::SecurityInfo info;
-  // You cannot use WinSandbox::USER_INTERACTIVE here because restricted token
-  // seems to prevent WinHTTP from using SSL. b/5502343
-  info.primary_level = WinSandbox::USER_NON_ADMIN;
-  info.impersonation_level = WinSandbox::USER_RESTRICTED_SAME_ACCESS;
-  info.integrity_level = WinSandbox::INTEGRITY_LEVEL_LOW;
-  info.use_locked_down_job = true;
-  info.allow_ui_operation = false;
-  info.in_system_dir = true;  // use system dir not to lock current directory
-  info.creation_flags = CREATE_DEFAULT_ERROR_MODE | CREATE_NO_WINDOW;
+  // Primary path: ask the cache service - a persistent, auto-start LocalSystem
+  // service - to launch mozc_server in our session via its RPC launch helper.
+  // The service spawns the child with the same restricted, low-integrity profile
+  // we would use below, and it works even when this process is too sandboxed to
+  // CreateProcess across the necessary boundaries itself. The helper launches
+  // with a fixed (empty) argument list, so only take it when we have no extra
+  // server flags to pass - always true on release builds; DEBUG may inject flags
+  // via LoadServerFlags(), in which case we must use the in-process launch that
+  // honors |arg|. The helper returns no pid, so |pid| stays 0 and we wait on the
+  // readiness event only (see below).
+  bool result = false;
+  if (arg.empty()) {
+    result = ipc::win::CacheServiceRpcClient::LaunchServer();
+    if (!result) {
+      LOG(WARNING) << "CacheServiceRpcClient::LaunchServer failed; falling back "
+                      "to in-process WinSandbox::SpawnSandboxedProcess";
+    }
+  }
 
-  DWORD tmp_pid = 0;
-  const bool result = mozc::WinSandbox::SpawnSandboxedProcess(
-      server_program(), arg, info, &tmp_pid);
-  pid = static_cast<size_t>(tmp_pid);
+  if (!result) {
+    mozc::WinSandbox::SecurityInfo info;
+    // You cannot use WinSandbox::USER_INTERACTIVE here because restricted token
+    // seems to prevent WinHTTP from using SSL. b/5502343
+    info.primary_level = WinSandbox::USER_NON_ADMIN;
+    info.impersonation_level = WinSandbox::USER_RESTRICTED_SAME_ACCESS;
+    info.integrity_level = WinSandbox::INTEGRITY_LEVEL_LOW;
+    info.use_locked_down_job = true;
+    info.allow_ui_operation = false;
+    info.in_system_dir = true;  // use system dir not to lock current directory
+    info.creation_flags = CREATE_DEFAULT_ERROR_MODE | CREATE_NO_WINDOW;
+
+    DWORD tmp_pid = 0;
+    result = mozc::WinSandbox::SpawnSandboxedProcess(server_program(), arg, info,
+                                                     &tmp_pid);
+    pid = static_cast<size_t>(tmp_pid);
+  }
 
   if (!result) {
     LOG(ERROR) << "Can't start process: " << ::GetLastError();
@@ -172,7 +194,16 @@ bool ServerLauncher::StartServer(ClientInterface *client) {
   // Common part:
   // Wait until mozc_server becomes ready to process requests
   if (listener_is_available) {
-    const int ret = listener.WaitEventOrProcess(kServerWaitTimeout, pid);
+    // With a known child pid (the in-process launch paths) we watch both the
+    // readiness event and the process handle, so an early crash is detected
+    // promptly. The cache-service launch returns no pid (|pid| == 0); since
+    // WaitEventOrProcess treats pid 0 as an already-dead process, wait on the
+    // readiness event alone in that case.
+    const int ret =
+        (pid != 0) ? listener.WaitEventOrProcess(kServerWaitTimeout, pid)
+                   : (listener.Wait(kServerWaitTimeout)
+                          ? static_cast<int>(NamedEventListener::EVENT_SIGNALED)
+                          : static_cast<int>(NamedEventListener::TIMEOUT));
     switch (ret) {
       case NamedEventListener::TIMEOUT:
         LOG(WARNING) << "seems that " << kProductNameInEnglish << " is not "

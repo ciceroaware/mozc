@@ -258,18 +258,31 @@ void SetAdvancedConfig(const ScopedSCHandle& service_handle) {
   // http://blogs.technet.com/richard_macdonald/archive/2007/06/27/1375523.aspx
   // See also http://b/2470180
 
-  // Only SE_INC_BASE_PRIORITY_NAME and SE_CHANGE_NOTIFY are needed.
-  // According to MSDN Library, we need not explicitly specify the latter.
-  // See http://msdn.microsoft.com/en-us/library/ms685976.aspx for details.
+  // The cache service runs with the minimum privileges it needs. Restricting
+  // the set here makes the SCM strip every other privilege from the (LocalSystem)
+  // service token. SE_CHANGE_NOTIFY need not be listed explicitly (see
+  // http://msdn.microsoft.com/en-us/library/ms685976.aspx).
+  //
+  // SE_INC_BASE_PRIORITY_NAME is for the service's original task (locking the
+  // converter image into RAM). The remaining three are required by the MSRPC
+  // launch helper: SE_ASSIGNPRIMARYTOKEN_NAME and SE_INCREASE_QUOTA_NAME for
+  // CreateProcessAsUser, and SE_IMPERSONATE_NAME for RpcImpersonateClient.
+  // Without them the launch fails with ERROR_PRIVILEGE_NOT_HELD (1314).
   {
     SERVICE_REQUIRED_PRIVILEGES_INFO privileges_info = {};
-    // |SERVICE_REQUIRED_PRIVILEGES_INFO::pmszRequiredPrivileges| needs to be
-    // terminated with two L'\0's.
-    std::wstring required_privileges(SE_INC_BASE_PRIORITY_NAME);
+    static constexpr const wchar_t *kRequiredPrivileges[] = {
+        SE_INC_BASE_PRIORITY_NAME,
+        SE_ASSIGNPRIMARYTOKEN_NAME,
+        SE_INCREASE_QUOTA_NAME,
+        SE_IMPERSONATE_NAME,
+    };
+    // |pmszRequiredPrivileges| is a writable, double-null-terminated multi-sz.
+    std::wstring required_privileges;
+    for (const wchar_t *privilege : kRequiredPrivileges) {
+      required_privileges.append(privilege);
+      required_privileges.push_back(L'\0');
+    }
     required_privileges.push_back(L'\0');
-    required_privileges.push_back(L'\0');
-    // |SERVICE_REQUIRED_PRIVILEGES_INFO::pmszRequiredPrivileges| needs to be
-    // writable for some reasons.
     privileges_info.pmszRequiredPrivileges = required_privileges.data();
     if (!::ChangeServiceConfig2(service_handle.get(),
                                 SERVICE_CONFIG_REQUIRED_PRIVILEGES_INFO,
@@ -278,14 +291,23 @@ void SetAdvancedConfig(const ScopedSCHandle& service_handle) {
     }
   }
 
-  // Remove write privileges from the cache service.
-  // See http://msdn.microsoft.com/en-us/library/ms685987.aspx for details.
-  // This may restrict glog functions such as LOG(ERROR).
-  // TODO(yukawa): Output logging messages as debug strings, or output them
-  // to the Win32 event log.
+  // Assign a per-service SID to the cache service so it has a distinct security
+  // principal ("NT SERVICE\\<ServiceName>", a.k.a. a Virtual Service Account).
+  // This lets the service own ACL'd resources under its own identity (e.g. the
+  // MSRPC endpoint it hosts).
+  //
+  // We intentionally use SERVICE_SID_TYPE_UNRESTRICTED rather than
+  // SERVICE_SID_TYPE_RESTRICTED here. A write-restricted token blocks the
+  // privileged operations we expose over RPC - in particular launching
+  // mozc_server.exe / mozc_renderer.exe in the caller's session on behalf of
+  // sandboxed clients (CreateProcessAsUser, client impersonation). The previous
+  // RESTRICTED setting hardened the service by removing write access; dropping it
+  // is a deliberate trade-off to enable these features.
+  // See
+  // https://learn.microsoft.com/windows/win32/services/service-security-and-access-rights
   {
     SERVICE_SID_INFO sid_info = {};
-    sid_info.dwServiceSidType = SERVICE_SID_TYPE_RESTRICTED;
+    sid_info.dwServiceSidType = SERVICE_SID_TYPE_UNRESTRICTED;
     if (!::ChangeServiceConfig2(service_handle.get(),
                                 SERVICE_CONFIG_SERVICE_SID_INFO, &sid_info)) {
       LOG(ERROR) << "ChangeServiceConfig2 failed: " << ::GetLastError();

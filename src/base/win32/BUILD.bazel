@@ -120,6 +120,7 @@ mozc_cc_library(
     deps = [
         ":wide_char",
         "//base:system_util",
+        "//bazel/win32:userenv",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/types:span",
