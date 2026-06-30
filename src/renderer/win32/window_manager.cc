@@ -240,6 +240,7 @@ void WindowManager::UpdateLayout(const commands::RendererCommand& command) {
   // the stale DPI.
   const uint32_t target_dpi = GetDpiForPoint(target_point.x, target_point.y);
   main_window_->UpdateDpi(target_dpi);
+  cascading_window_->UpdateDpi(target_dpi);
   infolist_window_->UpdateDpi(target_dpi);
 
   if (candidate_changed &&
@@ -259,9 +260,13 @@ void WindowManager::UpdateLayout(const commands::RendererCommand& command) {
   }
 
   // We prefer the left position of candidate strings is aligned to
-  // that of preedit.
+  // that of preedit. The y zero-point is the chrome content origin so the
+  // visible content top — not the layered window's outer top, which sits
+  // above the content by the drop-shadow margin — lands at the caret-
+  // relative target point.
   const Point main_window_zero_point(
-      main_window_->GetCandidateColumnInClientCord().Left(), 0);
+      main_window_->GetCandidateColumnInClientCord().Left(),
+      main_window_->GetContentOriginInClientCord().y);
 
   Rect main_window_rect;
   {
@@ -288,9 +293,20 @@ void WindowManager::UpdateLayout(const commands::RendererCommand& command) {
   }
 
   const DWORD set_windows_pos_flags = SWP_NOACTIVATE | SWP_SHOWWINDOW;
+  // If the cascading window is currently visible, it sits on top of the
+  // main candidate window. Re-applying HWND_TOPMOST to the main window
+  // here would push it above the cascading window for one frame until
+  // the subsequent cascading SetWindowPos restores the order — that's
+  // the visible flicker. Keep the existing z-order in that case.
+  DWORD main_window_pos_flags = set_windows_pos_flags;
+  if (cascading_window_->IsWindowVisible() ||
+      infolist_window_->IsWindowVisible()) {
+    main_window_pos_flags |= SWP_NOZORDER;
+  }
   main_window_->SetWindowPos(HWND_TOPMOST, main_window_rect.Left(),
                              main_window_rect.Top(), main_window_rect.Width(),
-                             main_window_rect.Height(), set_windows_pos_flags);
+                             main_window_rect.Height(),
+                             main_window_pos_flags);
   // This trick ensures that the window is certainly shown as 'inactivated'
   // in terms of visual effect on DWM-enabled desktop.
   main_window_->SendMessageW(WM_NCACTIVATE, FALSE);
@@ -314,12 +330,35 @@ void WindowManager::UpdateLayout(const commands::RendererCommand& command) {
   if (infolist_visible && !cascading_visible) {
     if (candidate_changed) {
       infolist_window_->UpdateLayout(candidate_window);
-      infolist_window_->Invalidate();
     }
 
-    // Align infolist window
-    const Rect infolist_rect = WindowUtil::GetWindowRectForInfolistWindow(
+    // Align infolist window. WindowUtil::GetWindowRectForInfolistWindow
+    // butts the infolist's outer rect against the candidate's outer rect,
+    // but each window now carries a drop-shadow margin on every side. To
+    // make the visible content edges meet, shift the infolist by the sum
+    // of the parent's outward shadow on the touching side and the
+    // infolist's own inward shadow on the same side. The chrome's left,
+    // right, top, and bottom paddings are equal, so a single shadow
+    // dimension covers both sides.
+    Rect infolist_rect = WindowUtil::GetWindowRectForInfolistWindow(
         infolist_window_->GetLayoutSize(), main_window_rect, working_area);
+    const int parent_shadow_px =
+        main_window_->GetContentOriginInClientCord().x;
+    const int infolist_shadow_px =
+        infolist_window_->GetContentOriginInClientCord().x;
+    const int shadow_compensation_px = parent_shadow_px + infolist_shadow_px;
+    if (infolist_rect.Left() >= main_window_rect.Right()) {
+      // Infolist is on the right side of the candidate window.
+      infolist_rect = Rect(infolist_rect.Left() - shadow_compensation_px,
+                           infolist_rect.Top(), infolist_rect.Width(),
+                           infolist_rect.Height());
+    } else {
+      // Infolist was flipped to the left side because there isn't room on
+      // the right.
+      infolist_rect = Rect(infolist_rect.Left() + shadow_compensation_px,
+                           infolist_rect.Top(), infolist_rect.Width(),
+                           infolist_rect.Height());
+    }
     infolist_window_->MoveWindow(infolist_rect.Left(), infolist_rect.Top(),
                                  infolist_rect.Width(), infolist_rect.Height(),
                                  TRUE);
@@ -365,9 +404,25 @@ void WindowManager::UpdateLayout(const commands::RendererCommand& command) {
              selected_row.Top() - selected_row.Bottom()));
 
     // We prefer the top of client area of the cascading window is
-    // aligned to the top of selected candidate in the candidate window.
+    // aligned to the top of the selected candidate. WindowUtil anchors at
+    // selected_row.Right(), which here is the parent's *outer* right —
+    // i.e. it includes the parent's right-side drop-shadow margin. To
+    // make the cascading window's content overlap the parent's content
+    // by 8 DIP, the x zero-point has to compensate for three things:
+    //   - cascading's own left shadow (so cascading content lines up
+    //     against the anchor instead of cascading's outer bitmap edge),
+    //   - the parent's right shadow (so the anchor effectively becomes
+    //     the parent's content right, not its outer right),
+    //   - the desired 8 DIP visible overlap.
+    constexpr int kCascadingOverlapDip = 8;
+    const int cascading_overlap_px =
+        (kCascadingOverlapDip * static_cast<int>(target_dpi) + 48) / 96;
+    const int parent_right_shadow_px =
+        main_window_->GetContentOriginInClientCord().x;
     const Point cascading_window_zero_point(
-        0, cascading_window_->GetFirstRowInClientCord().Top());
+        cascading_window_->GetContentOriginInClientCord().x +
+            parent_right_shadow_px + cascading_overlap_px,
+        cascading_window_->GetFirstRowInClientCord().Top());
 
     const Size cascading_window_size = cascading_window_->GetLayoutSize();
 
@@ -385,13 +440,13 @@ void WindowManager::UpdateLayout(const commands::RendererCommand& command) {
     // in terms of visual effect on DWM-enabled desktop.
     cascading_window_->SendMessageW(WM_NCACTIVATE, FALSE);
     if (candidate_changed) {
-      main_window_->Invalidate();
-      cascading_window_->Invalidate();
+      main_window_->Redraw();
+      cascading_window_->Redraw();
     }
   } else {
     // no cascading window
     if (candidate_changed) {
-      main_window_->Invalidate();
+      main_window_->Redraw();
     }
     cascading_window_->ShowWindow(SW_HIDE);
   }

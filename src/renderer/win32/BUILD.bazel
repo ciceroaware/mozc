@@ -115,27 +115,66 @@ mozc_cc_library(
 )
 
 mozc_cc_library(
+    name = "modern_renderer_style",
+    srcs = ["modern_renderer_style.cc"],
+    hdrs = ["modern_renderer_style.h"],
+    tags = MOZC_TAGS.WIN_ONLY,
+    target_compatible_with = ["@platforms//os:windows"],
+    deps = [
+        ":win32_theme_util",
+    ],
+)
+
+mozc_cc_library(
+    name = "modern_candidate_layout",
+    srcs = ["modern_candidate_layout.cc"],
+    hdrs = ["modern_candidate_layout.h"],
+    tags = MOZC_TAGS.WIN_ONLY,
+    target_compatible_with = ["@platforms//os:windows"],
+    deps = [
+        ":modern_renderer_style",
+        "//base:coordinates",
+        "@com_google_absl//absl/log:check",
+    ],
+)
+
+mozc_cc_library(
+    name = "win32_theme_util",
+    srcs = ["win32_theme_util.cc"],
+    hdrs = ["win32_theme_util.h"],
+    tags = MOZC_TAGS.WIN_ONLY,
+    target_compatible_with = ["@platforms//os:windows"],
+)
+
+mozc_cc_library(
+    name = "chrome_renderer",
+    srcs = ["chrome_renderer.cc"],
+    hdrs = ["chrome_renderer.h"],
+    tags = MOZC_TAGS.WIN_ONLY,
+    target_compatible_with = ["@platforms//os:windows"],
+)
+
+mozc_cc_library(
     name = "candidate_window",
     srcs = ["candidate_window.cc"],
     hdrs = ["candidate_window.h"],
     tags = MOZC_TAGS.WIN_ONLY,
     target_compatible_with = ["@platforms//os:windows"],
     deps = [
-        ":resource_h",
+        ":chrome_renderer",
+        ":modern_candidate_layout",
+        ":modern_renderer_style",
         ":text_renderer",
-        ":win32_dpi_util",
+        ":win32_theme_util",
         "//base:const",
         "//base:coordinates",
         "//base/win32:wide_char",
         "//bazel/win32:gdi32",
-        "//bazel/win32:msimg32",
         "//bazel/win32:user32",
         "//client:client_interface",
         "//protocol:candidate_window_cc_proto",
         "//protocol:commands_cc_proto",
         "//protocol:renderer_cc_proto",
-        "//renderer:renderer_style_handler",
-        "//renderer:table_layout",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",
         "@com_microsoft_wil//:wil",
@@ -190,12 +229,10 @@ mozc_cc_library(
     target_compatible_with = ["@platforms//os:windows"],
     visibility = ["//visibility:private"],
     deps = [
-        ":win32_dpi_util",
         ":win32_font_util",
         "//base:coordinates",
         "//bazel/win32:d2d1",
         "//bazel/win32:dwrite",
-        "//protocol:renderer_cc_proto",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/types:span",
         "@com_microsoft_wil//:wil",
@@ -228,18 +265,18 @@ mozc_cc_library(
     tags = MOZC_TAGS.WIN_ONLY,
     target_compatible_with = ["@platforms//os:windows"],
     deps = [
+        ":chrome_renderer",
+        ":modern_renderer_style",
         ":text_renderer",
-        ":win32_dpi_util",
+        ":win32_theme_util",
         "//base:const",
         "//base:coordinates",
-        "//base:vlog",
         "//base/win32:wide_char",
         "//bazel/win32:gdi32",
         "//bazel/win32:user32",
         "//client:client_interface",
         "//protocol:candidate_window_cc_proto",
         "//protocol:commands_cc_proto",
-        "//protocol:renderer_cc_proto",
         "@com_microsoft_wil//:wil",
     ],
 )

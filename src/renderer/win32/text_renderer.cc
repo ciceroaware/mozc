@@ -51,15 +51,11 @@
 #include "absl/log/log.h"
 #include "absl/types/span.h"
 #include "base/coordinates.h"
-#include "protocol/renderer_style.pb.h"
-#include "renderer/win32/win32_dpi_util.h"
 #include "renderer/win32/win32_font_util.h"
 
 namespace mozc {
 namespace renderer {
 namespace win32 {
-
-using ::mozc::renderer::RendererStyle;
 
 namespace {
 
@@ -67,33 +63,27 @@ CRect ToCRect(const Rect& rect) {
   return CRect(rect.Left(), rect.Top(), rect.Right(), rect.Bottom());
 }
 
-COLORREF ToColorRef(const RendererStyle::RGBAColor& color) {
-  return RGB(color.r(), color.g(), color.b());
-}
-
 COLORREF GetTextColor(TextRenderer::FONT_TYPE type, uint32_t dpi) {
-  RendererStyle style;
-  GetScaledRendererStyle(&style, dpi);
-  const RendererStyle::InfolistStyle& infostyle = style.infolist_style();
-
   switch (type) {
     case TextRenderer::FONTSET_SHORTCUT:
-      return ToColorRef(style.shortcut_style().foreground_color());
+      return RGB(0x61, 0x61, 0x61);
     case TextRenderer::FONTSET_CANDIDATE:
-      return ToColorRef(style.candidate_style().foreground_color());
+      return RGB(0x00, 0x00, 0x00);
     case TextRenderer::FONTSET_DESCRIPTION:
-      return ToColorRef(style.description_style().foreground_color());
+      return RGB(0x88, 0x88, 0x88);
     case TextRenderer::FONTSET_FOOTER_INDEX:
+      return RGB(0x4c, 0x4c, 0x4c);
     case TextRenderer::FONTSET_FOOTER_LABEL:
-      return ToColorRef(style.footer_style().foreground_color());
+      return RGB(0x4c, 0x4c, 0x4c);
     case TextRenderer::FONTSET_FOOTER_SUBLABEL:
-      return ToColorRef(style.footer_sub_label_style().foreground_color());
+      return RGB(0xA7, 0xA7, 0xA7);
     case TextRenderer::FONTSET_INFOLIST_CAPTION:
-      return ToColorRef(infostyle.caption_style().foreground_color());
     case TextRenderer::FONTSET_INFOLIST_TITLE:
-      return ToColorRef(infostyle.title_style().foreground_color());
     case TextRenderer::FONTSET_INFOLIST_DESCRIPTION:
-      return ToColorRef(infostyle.description_style().foreground_color());
+      // The infolist window overrides text color per-call via
+      // RenderText/RenderTextList(..., color), so these defaults are only
+      // used for measurement-time color initialization.
+      return RGB(0x1A, 0x1A, 0x1A);
     default:
       break;
   }
@@ -103,46 +93,65 @@ COLORREF GetTextColor(TextRenderer::FONT_TYPE type, uint32_t dpi) {
 }
 
 LOGFONT GetLogFont(TextRenderer::FONT_TYPE type, uint32_t dpi) {
-  LOGFONT font = GetMessageBoxLogFont(dpi);
+  LOGFONT font = {
+      .lfHeight = -12,
+      .lfWidth = 0,
+      .lfEscapement = 0,
+      .lfOrientation = 0,
+      .lfWeight = 400,
+      .lfItalic = 0,
+      .lfUnderline = 0,
+      .lfStrikeOut = 0,
+      .lfCharSet = 1,
+      .lfOutPrecision = 0,
+      .lfClipPrecision = 0,
+      .lfQuality = 0,
+      .lfPitchAndFamily = 0,
+      .lfFaceName = L"Segoe UI",
+  };
 
   switch (type) {
-    case TextRenderer::FONTSET_SHORTCUT: {
-      font.lfHeight += (font.lfHeight > 0 ? 3 : -3);
-      font.lfWeight = FW_BOLD;
+    case TextRenderer::FONTSET_SHORTCUT:
+    case TextRenderer::FONTSET_CANDIDATE:
+    case TextRenderer::FONTSET_DESCRIPTION: {
+      // Candidate window fontset: Yu Gothic UI 12 pt. Bold for the
+      // shortcut indices to give them visual weight, normal elsewhere.
+      wcscpy_s(font.lfFaceName, L"Yu Gothic UI");
+      font.lfHeight = -::MulDiv(12, static_cast<int>(dpi), 72);
+      font.lfWeight = (type == TextRenderer::FONTSET_SHORTCUT) ? FW_BOLD
+                                                               : FW_NORMAL;
       return font;
     }
-    case TextRenderer::FONTSET_CANDIDATE: {
-      font.lfHeight += (font.lfHeight > 0 ? 3 : -3);
-      font.lfWeight = FW_NORMAL;
-      return font;
-    }
-    case TextRenderer::FONTSET_DESCRIPTION:
     case TextRenderer::FONTSET_FOOTER_INDEX:
     case TextRenderer::FONTSET_FOOTER_LABEL:
     case TextRenderer::FONTSET_FOOTER_SUBLABEL: {
+      // Candidate window fontset: Yu Gothic UI 12 pt. Bold for the
+      // shortcut indices to give them visual weight, normal elsewhere.
+      wcscpy_s(font.lfFaceName, L"Yu Gothic UI");
+      font.lfHeight = -::MulDiv(10, static_cast<int>(dpi), 72);
       font.lfWeight = FW_NORMAL;
       return font;
     }
-    default:
-      break;
-  }
-
-  // TODO(horo): Not only infolist fonts but also candidate fonts
-  //             should be created from RendererStyle
-  RendererStyle style;
-  GetScaledRendererStyle(&style, dpi);
-  const auto& infostyle = style.infolist_style();
-  switch (type) {
     case TextRenderer::FONTSET_INFOLIST_CAPTION: {
-      font.lfHeight = -infostyle.caption_style().font_size();
+      // Infolist section header. Bold so it reads as a header above the
+      // title/description rows.
+      wcscpy_s(font.lfFaceName, L"Yu Gothic UI");
+      font.lfHeight = -::MulDiv(10, static_cast<int>(dpi), 72);
+      font.lfWeight = FW_BOLD;
       return font;
     }
     case TextRenderer::FONTSET_INFOLIST_TITLE: {
-      font.lfHeight = -infostyle.title_style().font_size();
+      // Headword line: bold, slightly larger than the description.
+      wcscpy_s(font.lfFaceName, L"Yu Gothic UI");
+      font.lfHeight = -::MulDiv(11, static_cast<int>(dpi), 72);
+      font.lfWeight = FW_BOLD;
       return font;
     }
     case TextRenderer::FONTSET_INFOLIST_DESCRIPTION: {
-      font.lfHeight = -infostyle.description_style().font_size();
+      // Multi-line usage description.
+      wcscpy_s(font.lfFaceName, L"Yu Gothic UI");
+      font.lfHeight = -::MulDiv(10, static_cast<int>(dpi), 72);
+      font.lfWeight = FW_NORMAL;
       return font;
     }
     default:
@@ -168,7 +177,7 @@ DWORD GetGdiDrawTextStyle(TextRenderer::FONT_TYPE type) {
     case TextRenderer::FONTSET_SHORTCUT:
       return DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX;
     case TextRenderer::FONTSET_INFOLIST_CAPTION:
-      return DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX;
+      return DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX;
     case TextRenderer::FONTSET_INFOLIST_TITLE:
       return DT_LEFT | DT_SINGLELINE | DT_WORDBREAK | DT_EDITCONTROL |
              DT_NOPREFIX;
@@ -249,17 +258,28 @@ class GdiTextRenderer : public TextRenderer {
 
   void RenderText(HDC dc, const std::wstring_view text, const Rect& rect,
                   FONT_TYPE font_type) const override {
-    std::vector<TextRenderingInfo> infolist;
-    infolist.emplace_back(std::wstring(text), rect);
-    RenderTextList(dc, infolist, font_type);
+    RenderText(dc, text, rect, font_type, render_info_[font_type].color);
   }
 
   void RenderTextList(HDC dc,
                       const absl::Span<const TextRenderingInfo> display_list,
                       FONT_TYPE font_type) const override {
+    RenderTextList(dc, display_list, font_type, render_info_[font_type].color);
+  }
+
+  void RenderText(HDC dc, const std::wstring_view text, const Rect& rect,
+                  FONT_TYPE font_type, COLORREF color) const override {
+    std::vector<TextRenderingInfo> infolist;
+    infolist.emplace_back(std::wstring(text), rect);
+    RenderTextList(dc, infolist, font_type, color);
+  }
+
+  void RenderTextList(HDC dc,
+                      const absl::Span<const TextRenderingInfo> display_list,
+                      FONT_TYPE font_type, COLORREF color) const override {
     const auto& render_info = render_info_[font_type];
     const auto old_font = wil::SelectObject(dc, render_info.font.get());
-    const auto previous_color = ::SetTextColor(dc, render_info.color);
+    const auto previous_color = ::SetTextColor(dc, color);
     for (const TextRenderingInfo& info : display_list) {
       CRect rect = ToCRect(info.rect);
       ::DrawTextW(dc, info.text.data(), info.text.size(), &rect,
@@ -370,14 +390,25 @@ class DirectWriteTextRenderer : public TextRenderer {
 
   void RenderText(HDC dc, const std::wstring_view text, const Rect& rect,
                   FONT_TYPE font_type) const override {
-    std::vector<TextRenderingInfo> infolist;
-    infolist.emplace_back(std::wstring(text), rect);
-    RenderTextList(dc, infolist, font_type);
+    RenderText(dc, text, rect, font_type, render_info_[font_type].color);
   }
 
   void RenderTextList(HDC dc,
                       const absl::Span<const TextRenderingInfo> display_list,
                       FONT_TYPE font_type) const override {
+    RenderTextList(dc, display_list, font_type, render_info_[font_type].color);
+  }
+
+  void RenderText(HDC dc, const std::wstring_view text, const Rect& rect,
+                  FONT_TYPE font_type, COLORREF color) const override {
+    std::vector<TextRenderingInfo> infolist;
+    infolist.emplace_back(std::wstring(text), rect);
+    RenderTextList(dc, infolist, font_type, color);
+  }
+
+  void RenderTextList(HDC dc,
+                      const absl::Span<const TextRenderingInfo> display_list,
+                      FONT_TYPE font_type, COLORREF color) const override {
     constexpr size_t kMaxTrial = 3;
     size_t trial = 0;
     while (true) {
@@ -386,7 +417,7 @@ class DirectWriteTextRenderer : public TextRenderer {
         // This is not a recoverable error.
         return;
       }
-      const HRESULT hr = RenderTextListImpl(dc, display_list, font_type);
+      const HRESULT hr = RenderTextListImpl(dc, display_list, font_type, color);
       if (hr == D2DERR_RECREATE_TARGET && trial < kMaxTrial) {
         // This is a recoverable error just by recreating the render target.
         dc_render_target_.reset();
@@ -401,7 +432,7 @@ class DirectWriteTextRenderer : public TextRenderer {
 
   HRESULT RenderTextListImpl(
       HDC dc, const absl::Span<const TextRenderingInfo> display_list,
-      FONT_TYPE font_type) const {
+      FONT_TYPE font_type, COLORREF color) const {
     CRect total_rect;
     for (const auto& item : display_list) {
       const auto& item_rect = ToCRect(item.rect);
@@ -414,8 +445,8 @@ class DirectWriteTextRenderer : public TextRenderer {
       return hr;
     }
     wil::com_ptr_nothrow<ID2D1SolidColorBrush> brush;
-    hr = dc_render_target_->CreateSolidColorBrush(
-        ToD2DColor(render_info_[font_type].color), brush.put());
+    hr = dc_render_target_->CreateSolidColorBrush(ToD2DColor(color),
+                                                  brush.put());
     if (FAILED(hr)) {
       return hr;
     }
