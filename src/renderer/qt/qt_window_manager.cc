@@ -42,6 +42,7 @@
 #include "client/client_interface.h"
 #include "protocol/candidate_window.pb.h"
 #include "protocol/commands.pb.h"
+#include "protocol/renderer_style.pb.h"
 #include "renderer/renderer_style_handler.h"
 #include "renderer/window_util.h"
 
@@ -130,6 +131,14 @@ void QtWindowManager::ApplyStyleToWidgets() {
       QColorFromColor(style_.candidate_style().background_color());
   const QColor foreground =
       QColorFromColor(style_.candidate_style().foreground_color());
+  const QColor border = QColorFromColor(style_.border_color());
+
+  // By default the QTableWidget frame is drawn by the widget style from the
+  // application palette, which does not necessarily match the renderer style.
+  // Draw it explicitly with the border color of the current theme instead.
+  const QString frame_style = QString("QTableWidget { border: %1px solid %2; }")
+                                  .arg(style_.window_border())
+                                  .arg(border.name());
 
   for (QTableWidget* table : {candidates_, infolist_}) {
     if (table == nullptr) {
@@ -141,6 +150,27 @@ void QtWindowManager::ApplyStyleToWidgets() {
     palette.setColor(QPalette::Text, foreground);
     palette.setColor(QPalette::WindowText, foreground);
     table->setPalette(palette);
+    table->setStyleSheet(frame_style);
+  }
+}
+
+void QtWindowManager::SetDarkMode(bool dark) {
+  RendererStyleHandler::GetRendererStyle(
+      &style_, dark ? RendererStyleHandler::ColorTheme::kDark
+                    : RendererStyleHandler::ColorTheme::kLight);
+  ApplyStyleToWidgets();
+
+  // The table cells still hold the brushes of the previous theme, and they
+  // survive HideAllWindows(). Reset prev_command_ so that the next
+  // UpdateLayout() call takes the full FillCandidateWindow() path instead of
+  // the incremental-highlight path of UpdateCandidateWindow(), even when the
+  // same candidates are rendered again.
+  const commands::RendererCommand last_command = prev_command_;
+  prev_command_.Clear();
+
+  // Repaint the currently visible candidate window with the new colors.
+  if (candidates_ != nullptr && candidates_->isVisible()) {
+    UpdateLayout(last_command);
   }
 }
 
