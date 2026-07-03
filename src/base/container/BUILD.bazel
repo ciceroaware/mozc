@@ -139,6 +139,25 @@ mozc_cc_test(
 )
 
 mozc_cc_library(
+    name = "flat_trie",
+    hdrs = ["flat_trie.h"],
+    deps = [
+        "@com_google_absl//absl/strings:string_view",
+    ],
+)
+
+mozc_cc_test(
+    name = "flat_trie_test",
+    size = "small",
+    srcs = ["flat_trie_test.cc"],
+    deps = [
+        ":flat_trie",
+        "//testing:gunit_main",
+        "@com_google_absl//absl/strings:string_view",
+    ],
+)
+
+mozc_cc_library(
     name = "serialized_string_array",
     srcs = ["serialized_string_array.cc"],
     hdrs = ["serialized_string_array.h"],

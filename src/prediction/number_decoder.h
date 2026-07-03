@@ -42,7 +42,6 @@
 #include "absl/base/attributes.h"
 #include "absl/strings/str_format.h"
 #include "absl/strings/string_view.h"
-#include "base/container/trie.h"
 #include "dictionary/pos_matcher.h"
 #include "prediction/result.h"
 #include "request/conversion_request.h"
@@ -176,8 +175,6 @@ class NumberDecoder {
                            const number_decoder_internal::Entry& entry,
                            number_decoder_internal::State& state,
                            std::vector<NumberDecoderResult>& results) const;
-
-  const Trie<number_decoder_internal::Entry>& entries_;
 
   const uint16_t kanji_number_id_;
   const uint16_t number_id_;

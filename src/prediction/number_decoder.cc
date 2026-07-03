@@ -30,21 +30,20 @@
 #include "prediction/number_decoder.h"
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
-#include <memory>
 #include <optional>
 #include <ostream>
 #include <string>
 #include <utility>
 #include <vector>
 
-#include "absl/base/no_destructor.h"
 #include "absl/log/check.h"
 #include "absl/log/log.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
 #include "absl/strings/string_view.h"
-#include "base/container/trie.h"
+#include "base/container/flat_trie.h"
 #include "base/util.h"
 #include "converter/attribute.h"
 #include "dictionary/pos_matcher.h"
@@ -87,125 +86,112 @@ void MaybeAppendResult(const State& state,
   results.push_back(*std::move(result));
 }
 
-std::unique_ptr<const Trie<Entry>> CreateDefaultEntries() {
-  auto result = std::make_unique<Trie<Entry>>();
-  // unit
-  result->AddEntry("ぜろ", Entry({Type::UNIT, 0}));
-  result->AddEntry("いち", Entry({Type::UNIT, 1}));
-  result->AddEntry("いっ", Entry({Type::UNIT, 1}));
-  result->AddEntry("に", Entry({Type::UNIT, 2}));
-  result->AddEntry("さん", Entry({Type::UNIT, 3}));
-  result->AddEntry("し", Entry({Type::UNIT, 4}));
-  result->AddEntry("よん", Entry({Type::UNIT, 4}));
-  result->AddEntry("よ", Entry({Type::UNIT, 4}));
-  result->AddEntry("ご", Entry({Type::UNIT, 5}));
-  result->AddEntry("ろく", Entry({Type::UNIT, 6}));
-  result->AddEntry("ろっ", Entry({Type::UNIT, 6}));
-  result->AddEntry("なな", Entry({Type::UNIT, 7}));
-  result->AddEntry("しち", Entry({Type::UNIT, 7}));
-  result->AddEntry("はち", Entry({Type::UNIT, 8}));
-  result->AddEntry("はっ", Entry({Type::UNIT, 8}));
-  result->AddEntry("きゅう", Entry({Type::UNIT, 9}));
-  result->AddEntry("きゅー", Entry({Type::UNIT, 9}));
-  result->AddEntry("く", Entry({Type::UNIT, 9}));
+constexpr auto kEntryData = std::to_array<std::pair<absl::string_view, Entry>>({
+    // unit
+    {"ぜろ", {Type::UNIT, 0}},
+    {"いち", {Type::UNIT, 1}},
+    {"いっ", {Type::UNIT, 1}},
+    {"に", {Type::UNIT, 2}},
+    {"さん", {Type::UNIT, 3}},
+    {"し", {Type::UNIT, 4}},
+    {"よん", {Type::UNIT, 4}},
+    {"よ", {Type::UNIT, 4}},
+    {"ご", {Type::UNIT, 5}},
+    {"ろく", {Type::UNIT, 6}},
+    {"ろっ", {Type::UNIT, 6}},
+    {"なな", {Type::UNIT, 7}},
+    {"しち", {Type::UNIT, 7}},
+    {"はち", {Type::UNIT, 8}},
+    {"はっ", {Type::UNIT, 8}},
+    {"きゅう", {Type::UNIT, 9}},
+    {"きゅー", {Type::UNIT, 9}},
+    {"く", {Type::UNIT, 9}},
 
-  // small digit
-  // "重", etc
-  result->AddEntry("じゅう", Entry({Type::SMALL_DIGIT, 10, 2, "", true}));
-  result->AddEntry("じゅー", Entry({Type::SMALL_DIGIT, 10, 2, "", true}));
-  result->AddEntry("じゅっ", Entry({Type::SMALL_DIGIT, 10, 2}));
-  result->AddEntry("ひゃく", Entry({Type::SMALL_DIGIT, 100, 3}));
-  result->AddEntry("ひゃっ", Entry({Type::SMALL_DIGIT, 100, 3}));
-  result->AddEntry("びゃく", Entry({Type::SMALL_DIGIT, 100, 3}));
-  result->AddEntry("びゃっ", Entry({Type::SMALL_DIGIT, 100, 3}));
-  result->AddEntry("ぴゃく", Entry({Type::SMALL_DIGIT, 100, 3}));
-  result->AddEntry("ぴゃっ", Entry({Type::SMALL_DIGIT, 100, 3}));
-  // "戦", etc
-  result->AddEntry("せん", Entry({Type::SMALL_DIGIT, 1000, 4, "", true}));
-  // "膳"
-  result->AddEntry("ぜん", Entry({Type::SMALL_DIGIT, 1000, 4, "", true}));
+    // small digit
+    // "重", etc
+    {"じゅう", {Type::SMALL_DIGIT, 10, 2, "", true}},
+    {"じゅー", {Type::SMALL_DIGIT, 10, 2, "", true}},
+    {"じゅっ", {Type::SMALL_DIGIT, 10, 2}},
+    {"ひゃく", {Type::SMALL_DIGIT, 100, 3}},
+    {"ひゃっ", {Type::SMALL_DIGIT, 100, 3}},
+    {"びゃく", {Type::SMALL_DIGIT, 100, 3}},
+    {"びゃっ", {Type::SMALL_DIGIT, 100, 3}},
+    {"ぴゃく", {Type::SMALL_DIGIT, 100, 3}},
+    {"ぴゃっ", {Type::SMALL_DIGIT, 100, 3}},
+    // "戦", etc
+    {"せん", {Type::SMALL_DIGIT, 1000, 4, "", true}},
+    // "膳"
+    {"ぜん", {Type::SMALL_DIGIT, 1000, 4, "", true}},
 
-  // big digit
-  result->AddEntry("まん", Entry({Type::BIG_DIGIT, 10000, 5, "万"}));
-  result->AddEntry("おく", Entry({Type::BIG_DIGIT, -1, 9, "億"}));
-  result->AddEntry("おっ", Entry({Type::BIG_DIGIT, -1, 9, "億"}));
-  // "町", etc
-  result->AddEntry("ちょう", Entry({Type::BIG_DIGIT, -1, 13, "兆", true}));
-  // "系", etc
-  result->AddEntry("けい", Entry({Type::BIG_DIGIT, -1, 17, "京", true}));
-  result->AddEntry("がい", Entry({Type::BIG_DIGIT, -1, 21, "垓"}));
+    // big digit
+    {"まん", {Type::BIG_DIGIT, 10000, 5, "万"}},
+    {"おく", {Type::BIG_DIGIT, -1, 9, "億"}},
+    {"おっ", {Type::BIG_DIGIT, -1, 9, "億"}},
+    // "町", etc
+    {"ちょう", {Type::BIG_DIGIT, -1, 13, "兆", true}},
+    // "系", etc
+    {"けい", {Type::BIG_DIGIT, -1, 17, "京", true}},
+    {"がい", {Type::BIG_DIGIT, -1, 21, "垓"}},
 
-  // spacial cases
-  // conflict with "にち"
-  result->AddEntry("にちょう",
-                   Entry({Type::UNIT_AND_BIG_DIGIT, 2, 13, "兆", true, 3}));
-  result->AddEntry("にちょうめ",
-                   Entry({Type::UNIT_AND_STOP_DECODING, 2, -1, "", false, 3}));
-  result->AddEntry("にちゃん",
-                   Entry({Type::UNIT_AND_STOP_DECODING, 2, -1, "", false, 3}));
-  // サンチーム (currency) v.s. 3チーム
-  result->AddEntry("さんちーむ",
-                   Entry({Type::UNIT_AND_STOP_DECODING, 3, -1, "", true, 6}));
+    // spacial cases
+    // conflict with "にち"
+    {"にちょう", {Type::UNIT_AND_BIG_DIGIT, 2, 13, "兆", true, 3}},
+    {"にちょうめ", {Type::UNIT_AND_STOP_DECODING, 2, -1, "", false, 3}},
+    {"にちゃん", {Type::UNIT_AND_STOP_DECODING, 2, -1, "", false, 3}},
+    // サンチーム (currency) v.s. 3チーム
+    {"さんちーむ", {Type::UNIT_AND_STOP_DECODING, 3, -1, "", true, 6}},
 
-  // number suffix conflicting with the other entries
-  constexpr absl::string_view kSuffixEntries[] = {
-      // に
-      // 握り, 日, 人
-      "にぎり",
-      "にち",
-      "にん",
-      // し
-      // cc, シート, シーベルト (unit), 試合, 式, 室, 品, 社, 尺, 種, 周, 勝, 色
-      // シリング, 進, シンガポールドル
-      "しーしー",
-      "しーと",
-      "しーべると",
-      "しあい",
-      "しき",
-      "しつ",
-      "しな",
-      "しゃ",
-      "しゅ",
-      "しょう",
-      "しょく",
-      "しりんぐ",
-      "しん",
-      // よ
-      // 葉
-      "よう",
-      // ご
-      // 号
-      "ごう",
-      // く
-      // 口, 組, クラス, クローナ
-      "くだり",
-      "くち",
-      "くみ",
-      "くらす",
-      "くろーな",
-      // せん
-      // センチ, セント
-      "せんち",
-      "せんと",
-      // おく
-      // オクターブ
-      "おくたーぶ",
-      // ちょう
-      // 丁目
-      "ちょうめ",
-  };
-  for (const auto& key : kSuffixEntries) {
-    result->AddEntry(key, Entry());
-  }
-  return result;
-}
+    // number suffix conflicting with the other entries
+    // に
+    // 握り, 日, 人
+    {"にぎり", {}},
+    {"にち", {}},
+    {"にん", {}},
+    // し
+    // cc, シート, シーベルト (unit), 試合, 式, 室, 品, 社, 尺, 種, 周, 勝, 色
+    // シリング, 進, シンガポールドル
+    {"しーしー", {}},
+    {"しーと", {}},
+    {"しーべると", {}},
+    {"しあい", {}},
+    {"しき", {}},
+    {"しつ", {}},
+    {"しな", {}},
+    {"しゃ", {}},
+    {"しゅ", {}},
+    {"しょう", {}},
+    {"しょく", {}},
+    {"しりんぐ", {}},
+    {"しん", {}},
+    // よ
+    // 葉
+    {"よう", {}},
+    // ご
+    // 号
+    {"ごう", {}},
+    // く
+    // 口, 組, クラス, クローナ
+    {"くだり", {}},
+    {"くち", {}},
+    {"くみ", {}},
+    {"くらす", {}},
+    {"くろーな", {}},
+    // せん
+    // センチ, セント
+    {"せんち", {}},
+    {"せんと", {}},
+    // おく
+    // オクターブ
+    {"おくたーぶ", {}},
+    // ちょう
+    // 丁目
+    {"ちょうめ", {}},
+});
 
-const Trie<Entry>& InitEntries() {
-  // Returns a singleton enries.
-  static const absl::NoDestructor<std::unique_ptr<const Trie<Entry>>>
-      kDefaultEntries(CreateDefaultEntries());
-  return **kDefaultEntries;
-}
+// The trie is built at compile time and placed in the read-only data section
+// of the binary; no heap allocation nor dynamic initialization happens at
+// runtime.
+constexpr auto kEntries = mozc::CreateFlatTrie<kEntryData>();
 
 }  // namespace
 
@@ -215,8 +201,7 @@ std::ostream& operator<<(std::ostream& os, const NumberDecoderResult& r) {
 }
 
 NumberDecoder::NumberDecoder(const dictionary::PosMatcher& pos_matcher)
-    : entries_(InitEntries()),
-      kanji_number_id_(pos_matcher.GetKanjiNumberId()),
+    : kanji_number_id_(pos_matcher.GetKanjiNumberId()),
       number_id_(pos_matcher.GetNumberId()) {}
 
 std::vector<prediction::Result> NumberDecoder::Decode(
@@ -266,7 +251,7 @@ void NumberDecoder::DecodeAux(absl::string_view key, State& state,
   }
   size_t key_byte_len;
   Entry e;
-  if (!entries_.LongestMatch(key, &e, &key_byte_len)) {
+  if (!kEntries.LongestMatch(key, &e, &key_byte_len)) {
     return;
   }
   const absl::string_view k = key.substr(0, key_byte_len);
