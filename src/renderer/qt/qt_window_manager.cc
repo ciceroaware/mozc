@@ -117,6 +117,29 @@ void QtWindowManager::Initialize() {
   infolist_->setColumnCount(1);
   infolist_->setRowCount(3);
   infolist_->setColumnWidth(0, kInfolistWidth);
+
+  ApplyStyleToWidgets();
+}
+
+void QtWindowManager::ApplyStyleToWidgets() {
+  const RendererStyle::RGBAColor& bg =
+      style_.candidate_style().background_color();
+  const RendererStyle::RGBAColor& fg =
+      style_.candidate_style().foreground_color();
+  const QColor background(bg.r(), bg.g(), bg.b(), 255 * bg.a());
+  const QColor foreground(fg.r(), fg.g(), fg.b(), 255 * fg.a());
+
+  for (QTableWidget* table : {candidates_, infolist_}) {
+    if (table == nullptr) {
+      continue;
+    }
+    QPalette palette = table->palette();
+    palette.setColor(QPalette::Base, background);
+    palette.setColor(QPalette::Window, background);
+    palette.setColor(QPalette::Text, foreground);
+    palette.setColor(QPalette::WindowText, foreground);
+    table->setPalette(palette);
+  }
 }
 
 void QtWindowManager::HideAllWindows() {
@@ -296,6 +319,8 @@ void FillCandidateWindow(const commands::CandidateWindow& candidate_window,
 
   const QBrush shortcut_brush =
       QBrushFromColor(style.shortcut_style().foreground_color());
+  const QBrush candidate_brush =
+      QBrushFromColor(style.candidate_style().foreground_color());
   const QBrush description_brush =
       QBrushFromColor(style.description_style().foreground_color());
   const QBrush footer_bg_brush = QBrushFromColor(style.footer_bottom_color());
@@ -315,6 +340,7 @@ void FillCandidateWindow(const commands::CandidateWindow& candidate_window,
 
     // value
     auto item1 = new QTableWidgetItem(QStr(value));
+    item1->setForeground(candidate_brush);
     table->setItem(i, 1, item1);
 
     // description
@@ -527,6 +553,8 @@ void QtWindowManager::UpdateInfolistWindow(
   QTableWidgetItem* infolist_title = new QTableWidgetItem(QStr(caption));
   infolist_title->setBackground(QBrush(
       QBrushFromColor(style_.infolist_style().caption_background_color())));
+  infolist_title->setForeground(
+      QBrushFromColor(style_.infolist_style().caption_style().foreground_color()));
   infolist_->setItem(0, 0, infolist_title);
   total_height += GetItemHeight(*infolist_title);
 
@@ -537,6 +565,10 @@ void QtWindowManager::UpdateInfolistWindow(
     const std::string desc = info.information(i).description();
     const auto qtitle = new QTableWidgetItem(QString::fromUtf8(title.c_str()));
     const auto qdesc = new QTableWidgetItem(QString::fromUtf8(desc.c_str()));
+    qtitle->setForeground(
+        QBrushFromColor(style_.infolist_style().title_style().foreground_color()));
+    qdesc->setForeground(QBrushFromColor(
+        style_.infolist_style().description_style().foreground_color()));
 
     const int title_height = GetItemHeight(*qtitle);
     const int desc_height =
