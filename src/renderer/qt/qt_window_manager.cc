@@ -459,15 +459,19 @@ Rect QtWindowManager::UpdateCandidateWindow(
 
   if (IsUpdated(prev_command_, command)) {
     FillCandidateWindow(candidate_window, style_, candidates_);
-    const Size win_size(candidates_->width(), candidates_->height());
-    const Point win_pos = GetWindowPosition(command, win_size);
-    candidates_->move(win_pos.x, win_pos.y);
   } else {
     // Reset the previous focused highlight
     const int prev_focused =
         GetFocusedRow(prev_command_.output().candidate_window());
     FillCandidateHighlight(candidate_window, prev_focused, style_, candidates_);
   }
+
+  // Move the window unconditionally, as the preedit rectangle may change even
+  // when the candidate list does not (e.g. the same candidates are shown again
+  // at a different cursor position).
+  const Size win_size(candidates_->width(), candidates_->height());
+  const Point win_pos = GetWindowPosition(command, win_size);
+  candidates_->move(win_pos.x, win_pos.y);
 
   // Set the focused highlight
   FillCandidateHighlight(candidate_window, GetFocusedRow(candidate_window),
