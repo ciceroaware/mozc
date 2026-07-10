@@ -49,6 +49,10 @@ class QtWindowManager {
 
   void Initialize();
 
+  // Switches the candidate/infolist windows between the light and dark color
+  // themes and repaints the currently visible window, if any.
+  void SetDarkMode(bool dark);
+
   void HideAllWindows();
   void ShowAllWindows();
   void UpdateLayout(const commands::RendererCommand &command);
@@ -82,6 +86,11 @@ class QtWindowManager {
                           const Size &win_size);
 
   void OnClicked(int row, int column);
+
+  // Applies the background colors of the current style_ to the candidate and
+  // infolist widgets' palettes, so that areas not covered by individual cells
+  // (e.g. the viewport) also follow the theme.
+  void ApplyStyleToWidgets();
 
  private:
   QTableWidget *candidates_ = nullptr;

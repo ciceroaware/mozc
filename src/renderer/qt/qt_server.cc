@@ -34,7 +34,13 @@
 #endif  // __linux__ && !__ANDROID__
 
 #include <QApplication>
+#include <QDBusConnection>
+#include <QDBusMessage>
+#include <QDBusReply>
+#include <QDBusVariant>
 #include <QMetaType>
+#include <QString>
+#include <QVariant>
 #include <string>
 
 #include "absl/log/log.h"
@@ -67,6 +73,19 @@ std::string GetServiceName() {
   }
   return name;
 }
+
+// XDG Desktop Portal `org.freedesktop.portal.Settings` interface, used to read
+// and observe the system dark-theme preference.
+// https://flatpak.github.io/xdg-desktop-portal/docs/doc-org.freedesktop.portal.Settings.html
+constexpr char kPortalService[] = "org.freedesktop.portal.Desktop";
+constexpr char kPortalPath[] = "/org/freedesktop/portal/desktop";
+constexpr char kPortalSettingsInterface[] = "org.freedesktop.portal.Settings";
+constexpr char kAppearanceNamespace[] = "org.freedesktop.appearance";
+constexpr char kColorSchemeKey[] = "color-scheme";
+
+// color-scheme values per the portal spec: 0 = no preference (treated as
+// light), 1 = prefer dark, 2 = prefer light.
+bool IsDarkColorScheme(uint color_scheme) { return color_scheme == 1; }
 }  // namespace
 
 QtServer::QtServer() {
@@ -107,9 +126,46 @@ int QtServer::StartServer(int argc, char** argv) {
   notifier.Notify();
 
   renderer_.Initialize();
+  InitColorThemeWatcher();
   connect(&ipc_thread_, &QtIpcThread::EmitUpdated, this, &QtServer::Update);
   ipc_thread_.start();
   return app.exec();
+}
+
+void QtServer::InitColorThemeWatcher() {
+  QDBusConnection bus = QDBusConnection::sessionBus();
+  if (!bus.isConnected()) {
+    return;
+  }
+
+  // Read the initial color-scheme value.
+  QDBusMessage call = QDBusMessage::createMethodCall(
+      kPortalService, kPortalPath, kPortalSettingsInterface, "ReadOne");
+  call << QString(kAppearanceNamespace) << QString(kColorSchemeKey);
+  const QDBusReply<QDBusVariant> reply = bus.call(call);
+  if (reply.isValid()) {
+    dark_mode_ = IsDarkColorScheme(reply.value().variant().toUInt());
+    renderer_.SetDarkMode(dark_mode_);
+  }
+
+  // Subscribe to live changes.
+  bus.connect(kPortalService, kPortalPath, kPortalSettingsInterface,
+              "SettingChanged", this,
+              SLOT(OnSettingChanged(QString, QString, QDBusVariant)));
+}
+
+void QtServer::OnSettingChanged(const QString& nameSpace, const QString& key,
+                                const QDBusVariant& value) {
+  if (nameSpace != QString(kAppearanceNamespace) ||
+      key != QString(kColorSchemeKey)) {
+    return;
+  }
+  const bool dark = IsDarkColorScheme(value.variant().toUInt());
+  if (dark == dark_mode_) {
+    return;  // Ignore duplicate notifications.
+  }
+  dark_mode_ = dark;
+  renderer_.SetDarkMode(dark_mode_);
 }
 
 bool QtServer::ExecCommandInternal(const commands::RendererCommand& command) {

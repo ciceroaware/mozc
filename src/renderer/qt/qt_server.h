@@ -30,6 +30,8 @@
 #ifndef MOZC_RENDERER_QT_QT_SERVER_H_
 #define MOZC_RENDERER_QT_QT_SERVER_H_
 
+#include <QDBusVariant>
+#include <QString>
 #include <string>
 
 #include "absl/strings/string_view.h"
@@ -55,6 +57,12 @@ class QtServer : public QObject {
  public slots:
   void Update(std::string command);
 
+  // Slot for the XDG Desktop Portal `org.freedesktop.portal.Settings`
+  // `SettingChanged` signal. Updates the renderer color theme when the
+  // `org.freedesktop.appearance` `color-scheme` value changes.
+  void OnSettingChanged(const QString& nameSpace, const QString& key,
+                        const QDBusVariant& value);
+
  signals:
   void EmitUpdated(std::string command);
 
@@ -63,9 +71,15 @@ class QtServer : public QObject {
   // of AsyncExecCommand()
   bool ExecCommandInternal(const commands::RendererCommand& command);
 
+  // Reads the initial color-scheme from the portal (if available) and
+  // subscribes to live changes. No-op on platforms without the portal.
+  void InitColorThemeWatcher();
+
   QtWindowManager renderer_;
 
  private:
+  bool dark_mode_ = false;
+
   QtIpcThread ipc_thread_;
 };
 
