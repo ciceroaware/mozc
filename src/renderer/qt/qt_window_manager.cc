@@ -42,6 +42,7 @@
 #include "client/client_interface.h"
 #include "protocol/candidate_window.pb.h"
 #include "protocol/commands.pb.h"
+#include "protocol/renderer_style.pb.h"
 #include "renderer/renderer_style_handler.h"
 #include "renderer/window_util.h"
 
@@ -130,17 +131,28 @@ void QtWindowManager::ApplyStyleToWidgets() {
       QColorFromColor(style_.candidate_style().background_color());
   const QColor foreground =
       QColorFromColor(style_.candidate_style().foreground_color());
+  const QColor border = QColorFromColor(style_.border_color());
+
+  // By default the QTableWidget frame and viewport are drawn by the widget
+  // style from the application palette, which does not necessarily match the
+  // renderer style. Override them with a style sheet. Note that these colors
+  // are deliberately not applied via QWidget::setPalette: palette changes are
+  // not reliably honored on widgets that have a style sheet, which would leave
+  // stale colors behind when the theme changes at runtime.
+  const QString sheet =
+      QString(
+          "QTableWidget { border: %1px solid %2;"
+          " background-color: %3; color: %4; }")
+          .arg(style_.window_border())
+          .arg(border.name())
+          .arg(background.name())
+          .arg(foreground.name());
 
   for (QTableWidget* table : {candidates_, infolist_}) {
     if (table == nullptr) {
       continue;
     }
-    QPalette palette = table->palette();
-    palette.setColor(QPalette::Base, background);
-    palette.setColor(QPalette::Window, background);
-    palette.setColor(QPalette::Text, foreground);
-    palette.setColor(QPalette::WindowText, foreground);
-    table->setPalette(palette);
+    table->setStyleSheet(sheet);
   }
 }
 
@@ -370,6 +382,8 @@ void FillCandidateWindow(const commands::CandidateWindow& candidate_window,
   }
   QTableWidgetItem* footer2 = table->item(cands_size, 2);
   footer2->setText(QStr(GetIndexGuideString(candidate_window)));
+  footer2->setForeground(
+      QBrushFromColor(style.footer_style().foreground_color()));
   footer2->setTextAlignment(Qt::AlignRight);
   max_width2 = std::max(max_width2, GetItemWidth(*footer2));
   const int footer_height = GetItemHeight(*footer2);

@@ -83,9 +83,9 @@ class QtWindowManager {
 
   void OnClicked(int row, int column);
 
-  // Applies the foreground / background colors of the current style_ to the
-  // candidate and infolist widgets' palettes, so that areas not covered by
-  // individual cells (e.g. the viewport) also follow the theme.
+  // Applies the colors of the current style_ to the candidate and infolist
+  // widgets via a style sheet, so that areas not covered by individual cells
+  // (e.g. the window border and the viewport) also follow the style.
   void ApplyStyleToWidgets();
 
  private:
