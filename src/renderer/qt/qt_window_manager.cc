@@ -29,9 +29,19 @@
 
 #include "renderer/qt/qt_window_manager.h"
 
+#include <QGuiApplication>
+#include <QtGlobal>
+
+#if defined(__linux__)
+#include <dlfcn.h>
+
+#include <QtGui/qguiapplication_platform.h>
+#endif  // __linux__
+
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <string>
 
 #include "absl/log/check.h"
@@ -68,6 +78,57 @@ QColor QColorFromColor(const RendererStyle::RGBAColor& rgba) {
 
 QBrush QBrushFromColor(const RendererStyle::RGBAColor& rgba) {
   return QBrush(QColorFromColor(rgba));
+}
+
+// Sets the X11 background pixel of the widget's native window.
+//
+// Qt creates xcb windows with no background (XCB_BACK_PIXMAP_NONE). When the
+// window is enlarged, the X server exposes the new region before the widget
+// repaints it, and with no background the region is presented as black on
+// XWayland. Setting the background pixel to the theme background color makes
+// the exposed region blend in until the actual content is painted. No-op on
+// platforms other than X11.
+//
+// xcb_change_window_attributes() is resolved with dlsym() to avoid a
+// build-time dependency on libxcb; when Qt runs on the xcb platform, its
+// platform plugin has already loaded libxcb into the process. The constant
+// and the signature below are part of the stable X protocol / libxcb ABI.
+void SetX11WindowBackground(QWidget* widget, const QColor& color) {
+#if defined(__linux__)
+  auto* x11 = qGuiApp->nativeInterface<QNativeInterface::QX11Application>();
+  if (x11 == nullptr) {
+    return;  // Not running on X11.
+  }
+  constexpr uint32_t kXcbCwBackPixel = 2;  // XCB_CW_BACK_PIXEL
+  struct XcbVoidCookie {
+    unsigned int sequence;
+  };
+  using XcbChangeWindowAttributesFunc = XcbVoidCookie (*)(
+      xcb_connection_t* connection, uint32_t window, uint32_t value_mask,
+      const void* value_list);
+  // Qt loads its platform plugin with RTLD_LOCAL, so libxcb may not be in the
+  // global symbol scope; take a handle on the (already loaded) library first.
+  static const auto xcb_change_window_attributes =
+      []() -> XcbChangeWindowAttributesFunc {
+    void* libxcb = dlopen("libxcb.so.1", RTLD_LAZY);
+    if (libxcb == nullptr) {
+      return nullptr;
+    }
+    return reinterpret_cast<XcbChangeWindowAttributesFunc>(
+        dlsym(libxcb, "xcb_change_window_attributes"));
+  }();
+  if (xcb_change_window_attributes == nullptr) {
+    return;
+  }
+  // Assumes a TrueColor visual. The alpha byte is ignored on 24-bit depth.
+  const uint32_t values[] = {0xff000000 |
+                             static_cast<uint32_t>(color.red()) << 16 |
+                             static_cast<uint32_t>(color.green()) << 8 |
+                             static_cast<uint32_t>(color.blue())};
+  xcb_change_window_attributes(x11->connection(),
+                               static_cast<uint32_t>(widget->winId()),
+                               kXcbCwBackPixel, values);
+#endif  // __linux__
 }
 
 }  // namespace
@@ -153,6 +214,7 @@ void QtWindowManager::ApplyStyleToWidgets() {
       continue;
     }
     table->setStyleSheet(sheet);
+    SetX11WindowBackground(table, background);
   }
 }
 
@@ -687,6 +749,14 @@ void QtWindowManager::UpdateLayout(const commands::RendererCommand& command) {
 
   const Rect candidate_window_rect = UpdateCandidateWindow(command);
   UpdateInfolistWindow(command, candidate_window_rect);
+
+  // Paint synchronously so that the new content reaches the X server as close
+  // to the resize request as possible; otherwise the enlarged region may be
+  // presented unpainted for a frame.
+  candidates_->repaint();
+  if (infolist_->isVisible()) {
+    infolist_->repaint();
+  }
 }
 
 bool QtWindowManager::Activate() {
