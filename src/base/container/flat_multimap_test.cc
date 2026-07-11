@@ -38,10 +38,10 @@
 namespace mozc {
 namespace {
 
+using ::testing::ElementsAre;
 using ::testing::Eq;
 using ::testing::IsEmpty;
 using ::testing::Pair;
-using ::testing::UnorderedElementsAre;
 
 TEST(FlatMultimapTest, EqualSpan) {
   constexpr auto kMultimap = CreateFlatMultimap<int, absl::string_view>({
@@ -56,15 +56,15 @@ TEST(FlatMultimapTest, EqualSpan) {
   EXPECT_THAT(kMultimap.EqualSpan(0), IsEmpty());
   EXPECT_THAT(
       kMultimap.EqualSpan(1),
-      UnorderedElementsAre(Pair(Eq(1), Eq("one")), Pair(Eq(1), Eq("ichi"))));
+      ElementsAre(Pair(Eq(1), Eq("one")), Pair(Eq(1), Eq("ichi"))));
   EXPECT_THAT(kMultimap.EqualSpan(2), IsEmpty());
   EXPECT_THAT(
       kMultimap.EqualSpan(3),
-      UnorderedElementsAre(Pair(Eq(3), Eq("three")), Pair(Eq(3), Eq("san"))));
+      ElementsAre(Pair(Eq(3), Eq("three")), Pair(Eq(3), Eq("san"))));
   EXPECT_THAT(kMultimap.EqualSpan(4), IsEmpty());
   EXPECT_THAT(
       kMultimap.EqualSpan(5),
-      UnorderedElementsAre(Pair(Eq(5), Eq("five")), Pair(Eq(5), Eq("go"))));
+      ElementsAre(Pair(Eq(5), Eq("five")), Pair(Eq(5), Eq("go"))));
   EXPECT_THAT(kMultimap.EqualSpan(6), IsEmpty());
 }
 
@@ -82,16 +82,35 @@ TEST(FlatMultimapTest, CustomCompare) {
   EXPECT_THAT(kMultimap.EqualSpan(0), IsEmpty());
   EXPECT_THAT(
       kMultimap.EqualSpan(1),
-      UnorderedElementsAre(Pair(Eq(1), Eq("one")), Pair(Eq(1), Eq("ichi"))));
+      ElementsAre(Pair(Eq(1), Eq("one")), Pair(Eq(1), Eq("ichi"))));
   EXPECT_THAT(kMultimap.EqualSpan(2), IsEmpty());
   EXPECT_THAT(
       kMultimap.EqualSpan(3),
-      UnorderedElementsAre(Pair(Eq(3), Eq("three")), Pair(Eq(3), Eq("san"))));
+      ElementsAre(Pair(Eq(3), Eq("three")), Pair(Eq(3), Eq("san"))));
   EXPECT_THAT(kMultimap.EqualSpan(4), IsEmpty());
   EXPECT_THAT(
       kMultimap.EqualSpan(5),
-      UnorderedElementsAre(Pair(Eq(5), Eq("five")), Pair(Eq(5), Eq("go"))));
+      ElementsAre(Pair(Eq(5), Eq("five")), Pair(Eq(5), Eq("go"))));
   EXPECT_THAT(kMultimap.EqualSpan(6), IsEmpty());
+}
+
+TEST(FlatMultimapTest, StableOrder) {
+  constexpr auto kMultimap = CreateFlatMultimap<int, absl::string_view>({
+      {1, "a"},
+      {2, "b"},
+      {1, "c"},
+      {2, "d"},
+      {1, "e"},
+      {2, "f"},
+      {1, "g"},
+  });
+
+  EXPECT_THAT(kMultimap.EqualSpan(1),
+              ElementsAre(Pair(Eq(1), Eq("a")), Pair(Eq(1), Eq("c")),
+                          Pair(Eq(1), Eq("e")), Pair(Eq(1), Eq("g"))));
+  EXPECT_THAT(kMultimap.EqualSpan(2),
+              ElementsAre(Pair(Eq(2), Eq("b")), Pair(Eq(2), Eq("d")),
+                          Pair(Eq(2), Eq("f"))));
 }
 
 }  // namespace

@@ -51,16 +51,27 @@ class FlatMultimap {
   constexpr FlatMultimap(std::array<std::pair<K, V>, N> entries,
                          const CompareKey &cmp_key = {})
       : entries_(std::move(entries)), cmp_key_(cmp_key) {
-    std::sort(entries_.begin(), entries_.end(),
-              [&](const std::pair<K, V> &a, const std::pair<K, V> &b) {
-                return cmp_key_(a.first, b.first);
-              });
+    // `std::stable_sort` is not `constexpr` until C++26, so emulate a stable
+    // sort by sorting indices with the original index as a tie-breaker.
+    std::array<size_t, N> indices{};
+    for (size_t i = 0; i < N; ++i) {
+      indices[i] = i;
+    }
+    std::sort(indices.begin(), indices.end(), [&](size_t a, size_t b) {
+      if (cmp_key_(entries_[a].first, entries_[b].first)) return true;
+      if (cmp_key_(entries_[b].first, entries_[a].first)) return false;
+      return a < b;
+    });
+    const std::array<std::pair<K, V>, N> original = entries_;
+    for (size_t i = 0; i < N; ++i) {
+      entries_[i] = original[indices[i]];
+    }
   }
 
   // Returns a span of entries with the given key.
   //
-  // IMPORTANT: The order of the returned span is not guaranteed to be the
-  // same as the order of the entries given when the map was created.
+  // Entries with the same key keep the relative order in which they were
+  // given when the map was created.
   constexpr absl::Span<const std::pair<K, V>> EqualSpan(const K &key) const {
     auto span = absl::MakeSpan(entries_);
     auto lb = internal::FindFirst(span, [&](const std::pair<K, V> &e) {
