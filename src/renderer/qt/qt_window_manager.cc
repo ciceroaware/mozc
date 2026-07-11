@@ -400,12 +400,55 @@ void FillCandidateWindow(const commands::CandidateWindow& candidate_window,
     footer_item->setBackground(footer_bg_brush);
     table->setItem(cands_size, i, footer_item);
   }
+  // Index guide (e.g. "1/10"), right-aligned in the description column.
+  const std::string index_guide = GetIndexGuideString(candidate_window);
   QTableWidgetItem* footer2 = table->item(cands_size, 2);
-  footer2->setText(QStr(GetIndexGuideString(candidate_window)));
+  footer2->setText(QStr(index_guide));
   footer2->setForeground(
       QBrushFromColor(style.footer_style().foreground_color()));
   footer2->setTextAlignment(Qt::AlignRight);
   max_width2 = std::max(max_width2, GetItemWidth(*footer2));
+
+  // Footer label (e.g. "Tabキーで選択" in the suggestion mode). The sub label
+  // (e.g. the version number on the dev channel) is shown only when the label
+  // is absent, following the Windows renderer.
+  table->clearSpans();
+  const commands::Footer& footer = candidate_window.footer();
+  const RendererStyle::TextStyle* label_style = nullptr;
+  absl::string_view label_text;
+  if (footer.has_label()) {
+    label_text = footer.label();
+    label_style = &style.footer_style();
+  } else if (footer.has_sub_label()) {
+    label_text = footer.sub_label();
+    label_style = &style.footer_sub_label_style();
+  }
+  if (label_style != nullptr) {
+    // The Windows renderer centers the label in the footer (DT_CENTER). Span
+    // the footer row to center the label across the entire window. When the
+    // index guide occupies the right side, center within the value column
+    // instead.
+    QTableWidgetItem* label_item;
+    if (index_guide.empty()) {
+      table->setSpan(cands_size, 0, 1, table->columnCount());
+      label_item = table->item(cands_size, 0);
+    } else {
+      label_item = table->item(cands_size, 1);
+    }
+    label_item->setText(QStr(label_text));
+    label_item->setForeground(QBrushFromColor(label_style->foreground_color()));
+    label_item->setTextAlignment(Qt::AlignCenter);
+
+    // Make sure the window is wide enough to show the whole label.
+    const int label_width = GetItemWidth(*label_item);
+    if (index_guide.empty()) {
+      const int deficit = label_width - (kColumn0Width + max_width1 +
+                                         max_width2 + kColumn3Width);
+      max_width1 += std::max(deficit, 0);
+    } else {
+      max_width1 = std::max(max_width1, label_width);
+    }
+  }
   const int footer_height = GetItemHeight(*footer2);
   table->setRowHeight(cands_size, footer_height);
   total_height += footer_height;
