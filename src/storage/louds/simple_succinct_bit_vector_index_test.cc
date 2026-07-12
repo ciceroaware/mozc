@@ -192,4 +192,29 @@ TEST_P(SimpleSuccinctBitVectorIndexTest, Pattern2) {
 }
 INSTANTIATE_TEST_CASE(GenPattern2Test);
 
+TEST_P(SimpleSuccinctBitVectorIndexTest, LengthNotMultipleOfEightBytes) {
+  const CacheSizeParam &param = GetParam();
+
+  // 12 bytes = 3 words of 32 bits.  This exercises the code paths that
+  // process the trailing 32-bit word of the data whose length is not a
+  // multiple of 64 bits.  Repeat the bit pattern '0b10101010'.
+  const std::string data(12, '\xAA');
+
+  SimpleSuccinctBitVectorIndex bit_vector;
+  bit_vector.Init(reinterpret_cast<const uint8_t *>(data.data()), data.length(),
+                  param.first, param.second);
+  EXPECT_EQ(bit_vector.GetNum0Bits(), 48);
+  EXPECT_EQ(bit_vector.GetNum1Bits(), 48);
+
+  for (int i = 0; i <= 96; ++i) {
+    EXPECT_EQ(bit_vector.Rank0(i), (i + 1) / 2) << i;
+    EXPECT_EQ(bit_vector.Rank1(i), i / 2) << i;
+  }
+  for (int i = 1; i <= 48; ++i) {
+    EXPECT_EQ(bit_vector.Select0(i), (i - 1) * 2) << i;
+    EXPECT_EQ(bit_vector.Select1(i), (i - 1) * 2 + 1) << i;
+  }
+}
+INSTANTIATE_TEST_CASE(GenLengthNotMultipleOfEightBytesTest);
+
 }  // namespace
