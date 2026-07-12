@@ -33,9 +33,9 @@
 #include <bit>
 #include <cstddef>
 #include <cstdint>
-#include <iterator>
 #include <vector>
 
+#include "absl/algorithm/container.h"
 #include "absl/log/check.h"
 #include "absl/types/span.h"
 #include "base/bits.h"
@@ -45,43 +45,21 @@ namespace storage {
 namespace louds {
 namespace {
 
-// An iterator adaptor that gives the view of 1-bit index as 0-bit index.
-class ZeroBitIndexIterator {
- public:
-  using difference_type = ptrdiff_t;
-  using value_type = int;
-  using pointer = const int *;
-  using reference = const int &;
-  using iterator_category = std::forward_iterator_tag;
-
-  ZeroBitIndexIterator(absl::Span<const int> index, int chunk_size,
-                       const int *ptr)
-      : data_{index.data()}, chunk_size_{chunk_size}, ptr_{ptr} {}
-
-  const int *ptr() const { return ptr_; }
-
-  ZeroBitIndexIterator &operator++() {
-    ++ptr_;
-    return *this;
-  }
-
-  friend bool operator!=(const ZeroBitIndexIterator &x,
-                         const ZeroBitIndexIterator &y) {
-    return x.ptr_ != y.ptr_;
-  }
-
-  int operator*() const {
-    // The number of 0-bits
-    //   = (total num bits) - (1-bits)
-    //   = (chunk_size [bytes] * 8 [bits/byte] * (ptr's offset) - (1-bits)
-    return chunk_size_ * 8 * (ptr_ - data_) - *ptr_;
-  }
-
- private:
-  const int *data_;
-  int chunk_size_;
-  const int *ptr_;
-};
+// Performs lower bound search on the 0-bit view of the 1-bit index over
+// |range|, which must be a subrange of |index|.  Each entry of |index|
+// stores the cumulative number of 1-bits, from which the number of 0-bits
+// is derived as follows:
+//   The number of 0-bits
+//     = (total num bits) - (1-bits)
+//     = (chunk_size [bytes] * 8 [bits/byte] * (entry's offset) - (1-bits)
+const int *LowerBound0Bit(absl::Span<const int> index, int chunk_size,
+                          absl::Span<const int> range, int value) {
+  const auto compare = [index, chunk_size](const int &num_1bits, int v) {
+    const ptrdiff_t offset = &num_1bits - index.data();
+    return ((chunk_size * 8 * offset) - num_1bits) < v;
+  };
+  return absl::c_lower_bound(range, value, compare);
+}
 
 inline int BitCount0(uint32_t x) {
   // Flip all bits, and count 1-bits.
@@ -132,12 +110,7 @@ void InitLowerBound0Cache(absl::Span<const int> index, int chunk_size,
   cache->push_back(index.data());
   for (size_t i = 1; i <= size; ++i) {
     const int target_index = increment * i;
-    const int *ptr =
-        std::lower_bound(ZeroBitIndexIterator(index, chunk_size, index.data()),
-                         ZeroBitIndexIterator(index, chunk_size,
-                                              index.data() + index.size()),
-                         target_index)
-            .ptr();
+    const int *ptr = LowerBound0Bit(index, chunk_size, index, target_index);
     cache->push_back(ptr);
   }
   cache->push_back(index.data() + index.size());
@@ -227,13 +200,11 @@ int SimpleSuccinctBitVectorIndex::Select0(int n) const {
   DCHECK_GE(lb0_cache_index, 0);
 
   // Binary search on chunks.
-  const int *chunk_ptr =
-      std::lower_bound(ZeroBitIndexIterator(index_, chunk_size_,
-                                            lb0_cache_[lb0_cache_index]),
-                       ZeroBitIndexIterator(index_, chunk_size_,
-                                            lb0_cache_[lb0_cache_index + 1]),
-                       n)
-          .ptr();
+  const int *chunk_ptr = LowerBound0Bit(
+      index_, chunk_size_,
+      absl::MakeConstSpan(lb0_cache_[lb0_cache_index],
+                          lb0_cache_[lb0_cache_index + 1]),
+      n);
   const int chunk_index = (chunk_ptr - index_.data()) - 1;
   DCHECK_GE(chunk_index, 0);
   n -= chunk_size_ * 8 * chunk_index - index_[chunk_index];
