@@ -88,11 +88,24 @@ inline int BitCount0(uint32_t x) {
   return std::popcount(~x);
 }
 
-// Returns 1-bits in the data to length words.
+// Returns 1-bits in the data to length words.  Here, a "word" is 32 bits;
+// the data is processed by 64 bits at a time for efficiency, and the last
+// word is processed separately when length is odd.
+//
+// Note: the Windows build targets baseline x86-64 without the POPCNT
+// instruction (Windows 11 24H2 and later already require POPCNT and SSE4.2,
+// but older Windows still runs on CPUs without them), so std::popcount
+// compiles to a multiply-based fallback of about 17 instructions per word.
+// Once POPCNT can be assumed, revisit: building with /clang:-msse4.2 makes
+// Rank1 another ~2x faster (BM_Rank1/65536: 5444 ns -> 2658 ns,
+// BM_Rank1/4194304: 6303 ns -> 3128 ns).
 int Count1Bits(const uint8_t *data, int length) {
   int num_bits = 0;
-  for (; length > 0; --length) {
-    num_bits += std::popcount(LoadUnalignedAdvance<uint32_t>(data));
+  for (; length >= 2; length -= 2) {
+    num_bits += std::popcount(LoadUnalignedAdvance<uint64_t>(data));
+  }
+  if (length > 0) {
+    num_bits += std::popcount(LoadUnaligned<uint32_t>(data));
   }
   return num_bits;
 }
