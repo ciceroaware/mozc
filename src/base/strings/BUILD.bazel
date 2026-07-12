@@ -31,6 +31,7 @@
 
 load(
     "//:build_defs.bzl",
+    "mozc_cc_binary",
     "mozc_cc_library",
     "mozc_cc_test",
     "mozc_select",
@@ -112,6 +113,17 @@ mozc_cc_library(
         "@com_google_absl//absl/base:nullability",
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/strings",
+    ],
+)
+
+mozc_cc_binary(
+    name = "unicode_benchmark",
+    srcs = ["unicode_benchmark.cc"],
+    deps = [
+        ":unicode",
+        "//base/strings/internal:utf8_internal",
+        "@com_google_absl//absl/strings",
+        "@com_google_benchmark//:benchmark_main",
     ],
 )
 
