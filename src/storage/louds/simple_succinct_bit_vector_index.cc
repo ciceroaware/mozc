@@ -83,6 +83,13 @@ class ZeroBitIndexIterator {
   const int *ptr_;
 };
 
+// Note: the Windows build targets baseline x86-64 without the POPCNT
+// instruction (Windows 11 24H2 and later already require POPCNT and SSE4.2,
+// but older Windows still runs on CPUs without them), so std::popcount here
+// and in the Select0/Select1 word scans compiles to a multiply-based
+// fallback. Once POPCNT can be assumed, revisit: building with
+// /clang:-msse4.2 measured Select0/Select1 another 9-36% faster (e.g.
+// BM_Select1/4194304: 30769 ns -> 19744 ns).
 inline int BitCount0(uint32_t x) {
   // Flip all bits, and count 1-bits.
   return std::popcount(~x);
@@ -250,15 +257,13 @@ int SimpleSuccinctBitVectorIndex::Select0(int n) const {
     ptr += 4;
   }
 
-  int index = (ptr - data_) * 8;
-  for (uint32_t word = ~LoadUnaligned<uint32_t>(ptr); n > 0;
-       word >>= 1, ++index) {
-    n -= (word & 1);
+  // Select the n-th 0-bit in the word: clear the lowest (n - 1) 1-bits of the
+  // inverted word, then the target position is the number of trailing zeros.
+  uint32_t word = ~LoadUnaligned<uint32_t>(ptr);
+  for (; n > 1; --n) {
+    word &= word - 1;
   }
-
-  // Index points to the "next bit" of the target one.
-  // Thus, subtract one to adjust.
-  return index - 1;
+  return (ptr - data_) * 8 + std::countr_zero(word);
 }
 
 int SimpleSuccinctBitVectorIndex::Select1(int n) const {
@@ -290,15 +295,13 @@ int SimpleSuccinctBitVectorIndex::Select1(int n) const {
     ptr += 4;
   }
 
-  int index = (ptr - data_) * 8;
-  for (uint32_t word = LoadUnaligned<uint32_t>(ptr); n > 0;
-       word >>= 1, ++index) {
-    n -= (word & 1);
+  // Select the n-th 1-bit in the word: clear the lowest (n - 1) 1-bits, then
+  // the target position is the number of trailing zeros.
+  uint32_t word = LoadUnaligned<uint32_t>(ptr);
+  for (; n > 1; --n) {
+    word &= word - 1;
   }
-
-  // Index points to the "next bit" of the target one.
-  // Thus, subtract one to adjust.
-  return index - 1;
+  return (ptr - data_) * 8 + std::countr_zero(word);
 }
 
 }  // namespace louds
