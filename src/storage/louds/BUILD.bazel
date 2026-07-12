@@ -32,6 +32,7 @@
 
 load(
     "//:build_defs.bzl",
+    "mozc_cc_binary",
     "mozc_cc_library",
     "mozc_cc_test",
 )
@@ -149,6 +150,15 @@ mozc_cc_test(
     deps = [
         ":simple_succinct_bit_vector_index",
         "//testing:gunit_main",
+    ],
+)
+
+mozc_cc_binary(
+    name = "simple_succinct_bit_vector_index_benchmark",
+    srcs = ["simple_succinct_bit_vector_index_benchmark.cc"],
+    deps = [
+        ":simple_succinct_bit_vector_index",
+        "@com_google_benchmark//:benchmark_main",
     ],
 )
 
