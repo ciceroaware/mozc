@@ -29,15 +29,53 @@
 
 #include "base/strings/unicode.h"
 
+#include <bit>
 #include <cstddef>
+#include <cstdint>
+#include <cstring>
 #include <string>
 #include <string_view>
 
 #include "absl/strings/string_view.h"
+#include "absl/types/span.h"
 #include "base/strings/internal/utf8_internal.h"
 
 namespace mozc {
 namespace strings {
+
+size_t CharsLen(const absl::string_view sv) {
+  // Count the bytes that are not UTF-8 continuation bytes (0b10xxxxxx), i.e.
+  // the leading byte of each character, processing eight bytes at a time with
+  // bit operations. A byte is a continuation byte iff its bit 7 is set and
+  // bit 6 is clear, i.e. bit 7 of (w & ~(w << 1)) is set. The left shift
+  // never mixes different bytes because only bit 7 of each byte is inspected
+  // afterwards. This is 2-20x faster than advancing by OneCharLen of each
+  // character (see unicode_benchmark.cc). Keep the iteration in the
+  // remove_prefix form: clang auto-vectorizes this loop shape, while the
+  // equivalent loop with explicit index arithmetic stays scalar and ~35%
+  // slower.
+  //
+  // The Windows build targets baseline x86-64 without the POPCNT
+  // instruction (Windows 11 24H2 and later already require POPCNT and
+  // SSE4.2, but older Windows still runs on CPUs without them). Once they
+  // can be assumed, revisit: with /clang:-msse4.2, clang emits a scalar
+  // popcnt loop instead of the SSE2 vectorization, which measured another
+  // ~1.75x faster (BM_CharsLen long inputs: ~540 ns -> ~305 ns).
+  constexpr uint64_t kHighBits = 0x8080808080808080;
+  constexpr size_t kBlockSize = sizeof(uint64_t);
+  absl::Span<const char> chars = absl::MakeConstSpan(sv.data(), sv.size());
+  size_t continuations = 0;
+  while (chars.size() >= kBlockSize) {
+    uint64_t w;
+    std::memcpy(&w, chars.data(), kBlockSize);
+    continuations += std::popcount(w & ~(w << 1) & kHighBits);
+    chars.remove_prefix(kBlockSize);
+  }
+  for (const char c : chars) {
+    continuations += (static_cast<uint8_t>(c) & 0xc0) == 0x80;
+  }
+  return sv.size() - continuations;
+}
 
 bool IsValidUtf8(const absl::string_view sv) {
   const char* const last = sv.data() + sv.size();
