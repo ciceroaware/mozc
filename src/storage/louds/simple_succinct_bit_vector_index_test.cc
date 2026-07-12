@@ -192,4 +192,48 @@ TEST_P(SimpleSuccinctBitVectorIndexTest, Pattern2) {
 }
 INSTANTIATE_TEST_CASE(GenPattern2Test);
 
+// Compares Select0 and Select1 against a naive scan for every rank.  The sizes
+// cover data shorter than a chunk, a partial last chunk, and exact multiples
+// of the chunk size; the densities cover empty, sparse, dense and full words.
+TEST_P(SimpleSuccinctBitVectorIndexTest, SelectAllRanks) {
+  const CacheSizeParam &param = GetParam();
+
+  constexpr int kSizes[] = {4, 28, 32, 36, 64, 100, 1024, 4100};
+  constexpr uint32_t kDensityPercents[] = {0, 3, 50, 97, 100};
+  for (const int size : kSizes) {
+    for (const uint32_t density : kDensityPercents) {
+      SCOPED_TRACE(::testing::Message()
+                   << "size=" << size << " density=" << density);
+      // A simple LCG for deterministic pseudo random bits.
+      uint32_t state = size * 7 + density;
+      std::string data(size, '\0');
+      for (char &c : data) {
+        uint8_t byte = 0;
+        for (int bit = 0; bit < 8; ++bit) {
+          state = state * 1664525u + 1013904223u;
+          byte |= static_cast<uint8_t>((state >> 16) % 100 < density) << bit;
+        }
+        c = static_cast<char>(byte);
+      }
+
+      SimpleSuccinctBitVectorIndex bit_vector;
+      bit_vector.Init(reinterpret_cast<const uint8_t *>(data.data()), size,
+                      param.first, param.second);
+      int num_0bits = 0;
+      int num_1bits = 0;
+      for (int pos = 0; pos < size * 8; ++pos) {
+        if ((static_cast<uint8_t>(data[pos / 8]) >> (pos % 8)) & 1) {
+          ASSERT_EQ(bit_vector.Select1(++num_1bits), pos);
+        } else {
+          ASSERT_EQ(bit_vector.Select0(++num_0bits), pos);
+        }
+      }
+      EXPECT_EQ(bit_vector.GetNum0Bits(), num_0bits);
+      EXPECT_EQ(bit_vector.GetNum1Bits(), num_1bits);
+    }
+  }
+}
+INSTANTIATE_TEST_CASE(GenSelectAllRanksTest);
+
+
 }  // namespace

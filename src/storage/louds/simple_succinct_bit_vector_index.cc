@@ -33,9 +33,9 @@
 #include <bit>
 #include <cstddef>
 #include <cstdint>
-#include <iterator>
 #include <vector>
 
+#include "absl/algorithm/container.h"
 #include "absl/log/check.h"
 #include "absl/types/span.h"
 #include "base/bits.h"
@@ -45,43 +45,95 @@ namespace storage {
 namespace louds {
 namespace {
 
-// An iterator adaptor that gives the view of 1-bit index as 0-bit index.
-class ZeroBitIndexIterator {
- public:
-  using difference_type = ptrdiff_t;
-  using value_type = int;
-  using pointer = const int*;
-  using reference = const int&;
-  using iterator_category = std::forward_iterator_tag;
+// Performs lower bound search on the 0-bit view of the 1-bit index over
+// |range|, which must be a subrange of |index|.  Each entry of |index|
+// stores the cumulative number of 1-bits, from which the number of 0-bits
+// is derived as follows:
+//   The number of 0-bits
+//     = (total num bits) - (1-bits)
+//     = (chunk_size [bytes] * 8 [bits/byte] * (entry's offset) - (1-bits)
+const int* LowerBound0Bit(absl::Span<const int> index, int chunk_size,
+                          absl::Span<const int> range, int value) {
+  const auto compare = [index, chunk_size](const int& num_1bits, int v) {
+    const ptrdiff_t offset = &num_1bits - index.data();
+    return ((chunk_size * 8 * offset) - num_1bits) < v;
+  };
+  return absl::c_lower_bound(range, value, compare);
+}
 
-  ZeroBitIndexIterator(absl::Span<const int> index, int chunk_size,
-                       const int* ptr)
-      : data_{index.data()}, chunk_size_{chunk_size}, ptr_{ptr} {}
+// Block size in bytes of the branchless select fast path below.  The default
+// chunk size of the index is one block.
+constexpr int kSelectBlockSize = 32;
 
-  const int* ptr() const { return ptr_; }
+constexpr uint64_t kOnesStep8 = 0x0101010101010101ULL;
+constexpr uint64_t kMsbsStep8 = 0x8080808080808080ULL;
 
-  ZeroBitIndexIterator& operator++() {
-    ++ptr_;
-    return *this;
+// kSelectInByte[b][r] is the position (0-7) of the r-th (0-based) 1-bit of
+// the byte b.  Entries with r >= popcount(b) are unused.
+struct SelectInByteTable {
+  constexpr SelectInByteTable() : table() {
+    for (int b = 0; b < 256; ++b) {
+      int r = 0;
+      for (int i = 0; i < 8; ++i) {
+        if ((b >> i) & 1) {
+          table[b][r++] = i;
+        }
+      }
+    }
   }
-
-  friend bool operator!=(const ZeroBitIndexIterator& x,
-                         const ZeroBitIndexIterator& y) {
-    return x.ptr_ != y.ptr_;
-  }
-
-  int operator*() const {
-    // The number of 0-bits
-    //   = (total num bits) - (1-bits)
-    //   = (chunk_size [bytes] * 8 [bits/byte] * (ptr's offset) - (1-bits)
-    return chunk_size_ * 8 * (ptr_ - data_) - *ptr_;
-  }
-
- private:
-  const int* data_;
-  int chunk_size_;
-  const int* ptr_;
+  uint8_t table[256][8];
 };
+constexpr SelectInByteTable kSelectInByte;
+
+// Returns the position (0-63) of the k-th (0-based) 1-bit of |x| without any
+// branch or loop (broadword select).
+//
+// REQUIRES: k < std::popcount(x).
+inline int SelectInWord(uint64_t x, int k) {
+  DCHECK_GE(k, 0);
+  DCHECK_LT(k, std::popcount(x));
+
+  // Popcount of each byte.
+  uint64_t s = x - ((x >> 1) & 0x5555555555555555ULL);
+  s = (s & 0x3333333333333333ULL) + ((s >> 2) & 0x3333333333333333ULL);
+  s = (s + (s >> 4)) & 0x0F0F0F0F0F0F0F0FULL;
+  // Byte i now holds the popcount of bytes 0..i (all values are < 128).
+  const uint64_t sums = s * kOnesStep8;
+  // The MSB of byte i is set iff sums_i <= k, i.e. the k-th bit is beyond
+  // byte i.  No borrow crosses a byte boundary because sums_i <= 64 < 128.
+  const uint64_t k_step8 = static_cast<uint64_t>(k) * kOnesStep8;
+  const uint64_t byte_flags = ((k_step8 | kMsbsStep8) - sums) & kMsbsStep8;
+  // The number of flagged bytes, summed into the top byte by a multiply.
+  const int shift =
+      static_cast<int>(((byte_flags >> 7) * kOnesStep8) >> 56) * 8;
+  // Rank of the target bit inside its byte.
+  const int rank = k - static_cast<int>(((sums << 8) >> shift) & 0xFF);
+  return shift + kSelectInByte.table[(x >> shift) & 0xFF][rank];
+}
+
+// Returns the position (0-255) of the n-th (1-based) 1-bit (or 0-bit if
+// |kInvert|) of the 32-byte block at |block|, without any branch or loop.
+//
+// REQUIRES: 1 <= n <= the number of such bits in the block.
+template <bool kInvert>
+inline int SelectInBlock(const uint8_t* block, int n) {
+  uint64_t words[4];
+  for (int i = 0; i < 4; ++i) {
+    const uint64_t w = LoadUnaligned<uint64_t>(block + 8 * i);
+    words[i] = kInvert ? ~w : w;
+  }
+  // preceding[i] is the number of bits in the words before word i.
+  int preceding[4];
+  preceding[0] = 0;
+  for (int i = 1; i < 4; ++i) {
+    preceding[i] = preceding[i - 1] + std::popcount(words[i - 1]);
+  }
+  // Index of the word that contains the n-th bit.  Indexing small local
+  // arrays instead of chaining conditionals keeps this free of data
+  // dependent branches.
+  const int k = (preceding[1] < n) + (preceding[2] < n) + (preceding[3] < n);
+  return k * 64 + SelectInWord(words[k], n - preceding[k] - 1);
+}
 
 inline int BitCount0(uint32_t x) {
   // Flip all bits, and count 1-bits.
@@ -136,12 +188,7 @@ void InitLowerBound0Cache(absl::Span<const int> index, int chunk_size,
   cache->push_back(index.data());
   for (size_t i = 1; i <= size; ++i) {
     const int target_index = increment * i;
-    const int* ptr =
-        std::lower_bound(ZeroBitIndexIterator(index, chunk_size, index.data()),
-                         ZeroBitIndexIterator(index, chunk_size,
-                                              index.data() + index.size()),
-                         target_index)
-            .ptr();
+    const int* ptr = LowerBound0Bit(index, chunk_size, index, target_index);
     cache->push_back(ptr);
   }
   cache->push_back(index.data() + index.size());
@@ -231,19 +278,22 @@ int SimpleSuccinctBitVectorIndex::Select0(int n) const {
   DCHECK_GE(lb0_cache_index, 0);
 
   // Binary search on chunks.
-  const int* chunk_ptr =
-      std::lower_bound(ZeroBitIndexIterator(index_, chunk_size_,
-                                            lb0_cache_[lb0_cache_index]),
-                       ZeroBitIndexIterator(index_, chunk_size_,
-                                            lb0_cache_[lb0_cache_index + 1]),
-                       n)
-          .ptr();
+  const int* chunk_ptr = LowerBound0Bit(
+      index_, chunk_size_,
+      absl::MakeConstSpan(lb0_cache_[lb0_cache_index],
+                          lb0_cache_[lb0_cache_index + 1]),
+      n);
   const int chunk_index = (chunk_ptr - index_.data()) - 1;
   DCHECK_GE(chunk_index, 0);
   n -= chunk_size_ * 8 * chunk_index - index_[chunk_index];
 
-  // Linear search on remaining "words"
   const int offset = (chunk_index * chunk_size_) & ~int{3};
+  if (chunk_size_ == kSelectBlockSize && offset + kSelectBlockSize <= length_) {
+    return offset * 8 + SelectInBlock<true>(data_ + offset, n);
+  }
+
+  // Generic path for other chunk sizes and for a partial last chunk.
+  // Linear search on remaining "words"
   const uint8_t* ptr = data_ + offset;
   while (true) {
     const int bit_count = BitCount0(LoadUnaligned<uint32_t>(ptr));
@@ -254,15 +304,13 @@ int SimpleSuccinctBitVectorIndex::Select0(int n) const {
     ptr += 4;
   }
 
-  int index = (ptr - data_) * 8;
-  for (uint32_t word = ~LoadUnaligned<uint32_t>(ptr); n > 0;
-       word >>= 1, ++index) {
-    n -= (word & 1);
+  // Select the n-th 0-bit in the word: clear the lowest (n - 1) 1-bits of the
+  // inverted word, then the target position is the number of trailing zeros.
+  uint32_t word = ~LoadUnaligned<uint32_t>(ptr);
+  for (; n > 1; --n) {
+    word &= word - 1;
   }
-
-  // Index points to the "next bit" of the target one.
-  // Thus, subtract one to adjust.
-  return index - 1;
+  return (ptr - data_) * 8 + std::countr_zero(word);
 }
 
 int SimpleSuccinctBitVectorIndex::Select1(int n) const {
@@ -282,8 +330,13 @@ int SimpleSuccinctBitVectorIndex::Select1(int n) const {
   DCHECK_GE(chunk_index, 0);
   n -= index_[chunk_index];
 
-  // Linear search on remaining "words"
   const int offset = (chunk_index * chunk_size_) & ~int{3};
+  if (chunk_size_ == kSelectBlockSize && offset + kSelectBlockSize <= length_) {
+    return offset * 8 + SelectInBlock<false>(data_ + offset, n);
+  }
+
+  // Generic path for other chunk sizes and for a partial last chunk.
+  // Linear search on remaining "words"
   const uint8_t* ptr = data_ + offset;
   while (true) {
     const int bit_count = std::popcount(LoadUnaligned<uint32_t>(ptr));
@@ -294,15 +347,13 @@ int SimpleSuccinctBitVectorIndex::Select1(int n) const {
     ptr += 4;
   }
 
-  int index = (ptr - data_) * 8;
-  for (uint32_t word = LoadUnaligned<uint32_t>(ptr); n > 0;
-       word >>= 1, ++index) {
-    n -= (word & 1);
+  // Select the n-th 1-bit in the word: clear the lowest (n - 1) 1-bits, then
+  // the target position is the number of trailing zeros.
+  uint32_t word = LoadUnaligned<uint32_t>(ptr);
+  for (; n > 1; --n) {
+    word &= word - 1;
   }
-
-  // Index points to the "next bit" of the target one.
-  // Thus, subtract one to adjust.
-  return index - 1;
+  return (ptr - data_) * 8 + std::countr_zero(word);
 }
 
 }  // namespace louds
