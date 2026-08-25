@@ -556,7 +556,18 @@ class TipUiElementDelegateImpl final : public TipUiElementDelegate {
   wil::com_ptr_nothrow<ITfContext> context_;
   const TipUiElementDelegateFactory::ElementType type_;
   CandidateList last_candidate_list_;
-  bool shown_;
+  // Whether this UI element is currently commanded to be visible. Show()
+  // records the result of the BeginUIElement negotiation here, and the
+  // renderer obeys it via TipUiElementManager::IsVisible() (FillVisibility in
+  // tip_ui_handler_conventional.cc), so IsShown() reports the TIP-commanded
+  // visibility of the corresponding window. Starts as false so that IsShown()
+  // answers "not shown" until the first Show() call -- BeginUIElement is
+  // documented to be called before showing UI, and sinks can (and do) query
+  // the element while that notification is still being dispatched. This also
+  // matches the behavior of the legacy Microsoft IME (imjptip.dll) and keeps
+  // the first kGuidCUASCandidateMessageCompartment update in Show()
+  // deterministic (it fires on shown_ transitions).
+  bool shown_ = false;
 };
 
 }  // namespace
