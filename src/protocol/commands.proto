@@ -537,6 +537,19 @@ message Context {
   // should update the revision whenever the input focus is changed.
   optional int32 revision = 5 [default = 0];
 
+  // Whether the input field being focused expects the conversion to be
+  // performed in incognito mode, i.e. without using nor updating the user
+  // history and user dictionary (e.g. a field marked with the IS_PRIVATE
+  // input scope on Windows). Unlike Request::is_incognito_mode, which is
+  // client-global, this field represents the state of the focused input
+  // field and is expected to be attached to every message.
+  // When any of this value, Request::is_incognito_mode and
+  // Config::incognito_mode are true, incognito mode is enabled.
+  // Converter modules need to check ConversionRequest::incognito_mode()
+  // instead of this value directly, as the incognito mode can be set in
+  // other ways.
+  optional bool is_incognito_mode = 6 [default = false];
+
   // Repeated fields to be used for experimental features.
   repeated string experimental_features = 100;
 }

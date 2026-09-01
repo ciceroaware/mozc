@@ -176,6 +176,13 @@ TEST(ConversionRequestTest, IncognitoModeTest) {
     EXPECT_TRUE(convreq.incognito_mode());
   }
   {
+    commands::Context context;
+    context.set_is_incognito_mode(true);
+    const ConversionRequest convreq =
+        ConversionRequestBuilder().SetContext(context).Build();
+    EXPECT_TRUE(convreq.incognito_mode());
+  }
+  {
     ConversionRequest::Options options;
     options.incognito_mode = true;
     const ConversionRequest convreq =
@@ -220,6 +227,23 @@ TEST(ConversionRequestTest, IncognitoModeTest) {
     const ConversionRequest convreq = ConversionRequestBuilder()
                                           .SetConfig(config)
                                           .SetRequest(request)
+                                          .SetOptions(std::move(options))
+                                          .Build();
+    EXPECT_TRUE(convreq.incognito_mode());
+  }
+  {
+    config::Config config;
+    config.set_incognito_mode(false);
+    commands::Request request;
+    request.set_is_incognito_mode(false);
+    commands::Context context;
+    context.set_is_incognito_mode(true);
+    ConversionRequest::Options options;
+    options.incognito_mode = false;
+    const ConversionRequest convreq = ConversionRequestBuilder()
+                                          .SetConfig(config)
+                                          .SetRequest(request)
+                                          .SetContext(context)
                                           .SetOptions(std::move(options))
                                           .Build();
     EXPECT_TRUE(convreq.incognito_mode());

@@ -190,11 +190,12 @@ class ConversionRequest {
   bool IsZeroQuerySuggestion() const { return key().empty(); }
 
   // Clients needs to check ConversionRequest::incognito_mode() instead
-  // of Config::incognito_mode() or Request::is_incognito_mode(), as the
-  // incognito mode can also set via Options.
+  // of Config::incognito_mode(), Request::is_incognito_mode() or
+  // Context::is_incognito_mode(), as the incognito mode can also set via
+  // Options.
   bool incognito_mode() const {
     return options_.incognito_mode || config_->incognito_mode() ||
-           request_->is_incognito_mode();
+           request_->is_incognito_mode() || context_->is_incognito_mode();
   }
 
   absl::string_view key() const ABSL_ATTRIBUTE_LIFETIME_BOUND { return key_; }

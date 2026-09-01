@@ -284,6 +284,11 @@ TipInputModeManager::Action TipInputModeManager::OnChangeInputScope(
   return kDoNothing;
 }
 
+bool TipInputModeManager::HasPrivateInputScope() const {
+  return std::find(input_scope_.begin(), input_scope_.end(), IS_PRIVATE) !=
+         input_scope_.end();
+}
+
 bool TipInputModeManager::GetEffectiveOpenClose() const {
   return mozc_state_.open_close;
 }
