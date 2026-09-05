@@ -54,7 +54,6 @@ namespace {
 // TODO: b/519413639 - Remove hardcoded values.
 constexpr int kMarginHeight = 5;
 constexpr int kMarginWidth = 20;
-constexpr int kColumn0Width = 20;
 constexpr int kColumn3Width = 6;
 // TODO: b/519413639 - This hardcoded value is different from textproto (300).
 constexpr int kInfolistWidth = 520;
@@ -481,22 +480,17 @@ void FillCandidateWindow(const commands::CandidateWindow& candidate_window,
   table->clear();
   table->setRowCount(cands_size + 1);  // +1 is for footer.
   table->setColumnCount(4);
-  // The shortcut column is shown only when at least one candidate has a
-  // shortcut, following the Windows renderer; e.g. candidates have no
-  // shortcut in the suggestion mode.
-  bool has_shortcut = false;
-  for (const commands::CandidateWindow::Candidate& candidate :
-       candidate_window.candidate()) {
-    if (candidate.has_annotation() &&
-        !candidate.annotation().shortcut().empty()) {
-      has_shortcut = true;
-      break;
-    }
-  }
-  const int column0_width = has_shortcut ? kColumn0Width : 0;
-  table->setColumnWidth(0, column0_width);  // shortcut
   table->setColumnWidth(3, kColumn3Width);  // infolist indicator
 
+  const int text_margin =
+      table->style()->pixelMetric(QStyle::PM_FocusFrameHMargin, nullptr,
+                                  table) +
+      1;
+
+  // The shortcut column is sized from the space-padded shortcut texts, so it
+  // is not shown at all when no candidate has a shortcut, e.g. in the
+  // suggestion mode, following the Windows renderer.
+  int column0_width = 0;
   int max_width1 = 0;
   int max_width2 = 0;
   int total_height = 0;
@@ -515,10 +509,19 @@ void FillCandidateWindow(const commands::CandidateWindow& candidate_window,
     GetDisplayString(candidate, shortcut, value, description);
 
     // shortcut
-    auto item0 = new QTableWidgetItem(QStr(shortcut));
+    // Pad the shortcut with spaces as the Windows renderer does; the padded
+    // text also determines the width of the shortcut column.
+    auto item0 = new QTableWidgetItem(
+        shortcut.empty() ? QString() : QStr(absl::StrCat(" ", shortcut, " ")));
     item0->setForeground(shortcut_brush);
     item0->setTextAlignment(Qt::AlignCenter);
     table->setItem(i, 0, item0);
+    if (!shortcut.empty()) {
+      const QFontMetrics metrics(item0->font());
+      column0_width =
+          std::max(column0_width, metrics.boundingRect(item0->text()).width() +
+                                      text_margin * 2);
+    }
 
     // value
     auto item1 = new QTableWidgetItem(QStr(value));
@@ -582,7 +585,8 @@ void FillCandidateWindow(const commands::CandidateWindow& candidate_window,
     } else {
       label_item = table->item(cands_size, 1);
     }
-    label_item->setText(QStr(label_text));
+    // Pad the label with spaces as the Windows renderer does.
+    label_item->setText(QStr(absl::StrCat(" ", label_text, " ")));
     label_item->setForeground(QBrushFromColor(label_style->foreground_color()));
     label_item->setTextAlignment(Qt::AlignCenter);
 
@@ -605,6 +609,7 @@ void FillCandidateWindow(const commands::CandidateWindow& candidate_window,
   total_height += footer_height;
 
   // Resize
+  table->setColumnWidth(0, column0_width);
   table->setColumnWidth(1, max_width1);
   table->setColumnWidth(2, max_width2);
   int width = column0_width + max_width1 + max_width2 + kColumn3Width;
