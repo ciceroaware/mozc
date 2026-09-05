@@ -68,6 +68,31 @@ class FooterBackgroundDelegate : public QStyledItemDelegate {
   QList<QColor> separator_colors_;
 };
 
+// Paints the infolist items honoring the left / right text paddings of the
+// renderer style. The paddings inset only the text; the backgrounds (e.g. the
+// caption background and the focused highlight) still cover the whole row, as
+// in the Windows renderer.
+class InfolistItemDelegate : public QStyledItemDelegate {
+ public:
+  explicit InfolistItemDelegate(QObject *parent = nullptr)
+      : QStyledItemDelegate(parent) {}
+
+  void SetTextPaddings(const RendererStyle::InfolistStyle &style);
+
+  void paint(QPainter *painter, const QStyleOptionViewItem &option,
+             const QModelIndex &index) const override;
+
+ private:
+  // Left / right text paddings of the caption row, the title rows and the
+  // description rows, respectively.
+  int caption_left_ = 0;
+  int caption_right_ = 0;
+  int title_left_ = 0;
+  int title_right_ = 0;
+  int description_left_ = 0;
+  int description_right_ = 0;
+};
+
 class QtWindowManager {
  public:
   QtWindowManager();
@@ -127,9 +152,11 @@ class QtWindowManager {
   QTableWidget *infolist_ = nullptr;
 
   // Does not have the ownership. `footer_delegate_`, `vscroll_bar_` and
-  // `vscroll_indicator_` are child QObjects of `candidates_`, which is
+  // `vscroll_indicator_` are child QObjects of `candidates_`, and
+  // `infolist_delegate_` is a child QObject of `infolist_`; the parents are
   // responsible for destroying them.
   FooterBackgroundDelegate* footer_delegate_ = nullptr;
+  InfolistItemDelegate* infolist_delegate_ = nullptr;
   QWidget* vscroll_bar_ = nullptr;
   QWidget* vscroll_indicator_ = nullptr;
 

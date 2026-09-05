@@ -109,6 +109,49 @@ void FooterBackgroundDelegate::paint(QPainter* painter,
   QStyledItemDelegate::paint(painter, option, index);
 }
 
+void InfolistItemDelegate::SetTextPaddings(
+    const RendererStyle::InfolistStyle& style) {
+  caption_left_ = style.caption_style().left_padding();
+  caption_right_ = style.caption_style().right_padding();
+  title_left_ = style.title_style().left_padding();
+  title_right_ = style.title_style().right_padding();
+  description_left_ = style.description_style().left_padding();
+  description_right_ = style.description_style().right_padding();
+}
+
+void InfolistItemDelegate::paint(QPainter* painter,
+                                 const QStyleOptionViewItem& option,
+                                 const QModelIndex& index) const {
+  QStyleOptionViewItem opt = option;
+  initStyleOption(&opt, index);
+
+  // Row 0 is the caption; the others are the alternating title and
+  // description rows. See QtWindowManager::UpdateInfolistWindow().
+  int left = 0;
+  int right = 0;
+  if (index.row() == 0) {
+    left = caption_left_;
+    right = caption_right_;
+  } else if (index.row() % 2 == 1) {
+    left = title_left_;
+    right = title_right_;
+  } else {
+    left = description_left_;
+    right = description_right_;
+  }
+
+  // Fill the background over the whole cell first, so that the paddings
+  // inset only the text.
+  if (opt.backgroundBrush.style() != Qt::NoBrush) {
+    painter->fillRect(opt.rect, opt.backgroundBrush);
+    opt.backgroundBrush = QBrush();
+  }
+  opt.rect.adjust(left, 0, -right, 0);
+  const QStyle* style =
+      opt.widget != nullptr ? opt.widget->style() : QApplication::style();
+  style->drawControl(QStyle::CE_ItemViewItem, &opt, painter, opt.widget);
+}
+
 QtWindowManager::QtWindowManager() {
   RendererStyleHandler::GetRendererStyle(&style_);
 }
@@ -165,6 +208,8 @@ void QtWindowManager::Initialize() {
 
   infolist_ = new QTableWidget();
   initialize_table(infolist_);
+  infolist_delegate_ = new InfolistItemDelegate(infolist_);
+  infolist_->setItemDelegate(infolist_delegate_);
   infolist_->setColumnCount(1);
   infolist_->setRowCount(3);
   infolist_->setColumnWidth(0, kInfolistWidth);
@@ -210,6 +255,10 @@ void QtWindowManager::ApplyStyleToWidgets() {
       separator_colors.append(QColorFromColor(color));
     }
     footer_delegate_->SetSeparatorColors(std::move(separator_colors));
+  }
+
+  if (infolist_delegate_ != nullptr) {
+    infolist_delegate_->SetTextPaddings(style_.infolist_style());
   }
 
   if (vscroll_bar_ != nullptr) {
