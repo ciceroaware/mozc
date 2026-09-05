@@ -501,6 +501,34 @@ void FillCandidateWindow(const commands::CandidateWindow& candidate_window,
       QBrushFromColor(style.candidate_style().foreground_color());
   const QBrush description_brush =
       QBrushFromColor(style.description_style().foreground_color());
+
+  // The candidate value and the shortcut are drawn with a slightly larger
+  // (+3 pixels) font than the default, and the shortcut is bold, following
+  // GetLogFont() of the Windows renderer. The other texts (the description
+  // and the footer) use the default font.
+  QFont candidate_font = table->font();
+  candidate_font.setPixelSize(QFontInfo(candidate_font).pixelSize() + 3);
+  // Use the font family actually used for Japanese glyphs as the primary
+  // family. Otherwise the Latin-only shortcut line and the mostly-Japanese
+  // value line would get different line heights (the Japanese glyphs come
+  // from a fallback font with taller metrics), and the vertically centered
+  // texts would sit on different baselines. GDI font linking on Windows
+  // keeps the metrics of the selected font, so the Windows renderer is not
+  // affected by this.
+  {
+    QTextLayout layout(QStringLiteral("あ"));  // "あ"
+    layout.setFont(candidate_font);
+    layout.beginLayout();
+    layout.createLine();
+    layout.endLayout();
+    const QList<QGlyphRun> glyph_runs = layout.glyphRuns();
+    if (!glyph_runs.isEmpty()) {
+      candidate_font.setFamilies({glyph_runs.first().rawFont().familyName()});
+    }
+  }
+  QFont shortcut_font = candidate_font;
+  shortcut_font.setBold(true);
+
   // Fill the candidates
   std::string shortcut, value, description;
   for (size_t i = 0; i < cands_size; ++i) {
@@ -513,6 +541,7 @@ void FillCandidateWindow(const commands::CandidateWindow& candidate_window,
     // text also determines the width of the shortcut column.
     auto item0 = new QTableWidgetItem(
         shortcut.empty() ? QString() : QStr(absl::StrCat(" ", shortcut, " ")));
+    item0->setFont(shortcut_font);
     item0->setForeground(shortcut_brush);
     item0->setTextAlignment(Qt::AlignCenter);
     table->setItem(i, 0, item0);
@@ -525,6 +554,7 @@ void FillCandidateWindow(const commands::CandidateWindow& candidate_window,
 
     // value
     auto item1 = new QTableWidgetItem(QStr(value));
+    item1->setFont(candidate_font);
     item1->setForeground(candidate_brush);
     table->setItem(i, 1, item1);
 
@@ -800,10 +830,22 @@ void QtWindowManager::UpdateInfolistWindow(
   infolist_->setRowCount(size * 2 + 1);  // +1 is for the caption title.
   int total_height = 12;                 // Heuristics margin.
 
-  // Caption title
   const RendererStyle::InfolistStyle& infolist_style = style_.infolist_style();
+
+  // The infolist texts are drawn with the font sizes of the infolist style,
+  // as in the Windows renderer (e.g. the title is larger than the
+  // description).
+  QFont caption_font = infolist_->font();
+  caption_font.setPixelSize(infolist_style.caption_style().font_size());
+  QFont title_font = infolist_->font();
+  title_font.setPixelSize(infolist_style.title_style().font_size());
+  QFont description_font = infolist_->font();
+  description_font.setPixelSize(infolist_style.description_style().font_size());
+
+  // Caption title
   absl::string_view caption = infolist_style.caption_string();
   QTableWidgetItem* infolist_title = new QTableWidgetItem(QStr(caption));
+  infolist_title->setFont(caption_font);
   infolist_title->setBackground(
       QBrushFromColor(infolist_style.caption_background_color()));
   infolist_title->setForeground(
@@ -818,6 +860,8 @@ void QtWindowManager::UpdateInfolistWindow(
     const std::string desc = info.information(i).description();
     const auto qtitle = new QTableWidgetItem(QString::fromUtf8(title.c_str()));
     const auto qdesc = new QTableWidgetItem(QString::fromUtf8(desc.c_str()));
+    qtitle->setFont(title_font);
+    qdesc->setFont(description_font);
     qtitle->setForeground(
         QBrushFromColor(infolist_style.title_style().foreground_color()));
     qdesc->setForeground(
