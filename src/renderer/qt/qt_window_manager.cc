@@ -768,6 +768,12 @@ void QtWindowManager::UpdateInfolistWindow(
         QBrushFromColor(infolist_style.title_style().foreground_color()));
     qdesc->setForeground(
         QBrushFromColor(infolist_style.description_style().foreground_color()));
+    // The Windows renderer aligns the title and the (multi-line) description
+    // to the top of their rows, unlike the other texts that are vertically
+    // centered. This is visible because the description row height is
+    // over-allocated by the heuristics below.
+    qtitle->setTextAlignment(Qt::AlignLeft | Qt::AlignTop);
+    qdesc->setTextAlignment(Qt::AlignLeft | Qt::AlignTop);
 
     const int title_height = GetItemHeight(*qtitle);
     const int desc_height =
