@@ -59,7 +59,7 @@ QtIpcServer::QtIpcServer()
     : IPCServer(MakeServiceName(), kNumConnections, kIPCServerTimeOut) {}
 QtIpcServer::~QtIpcServer() = default;
 
-bool QtIpcServer::Process(absl::string_view request, std::string *response) {
+bool QtIpcServer::Process(absl::string_view request, std::string* response) {
   // no need to set the result code.
   response->clear();
 

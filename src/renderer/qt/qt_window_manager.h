@@ -71,43 +71,43 @@ class FooterBackgroundDelegate : public QStyledItemDelegate {
 class QtWindowManager {
  public:
   QtWindowManager();
-  QtWindowManager(const QtWindowManager &) = delete;
-  QtWindowManager &operator=(const QtWindowManager &) = delete;
+  QtWindowManager(const QtWindowManager&) = delete;
+  QtWindowManager& operator=(const QtWindowManager&) = delete;
   ~QtWindowManager() = default;
 
   void Initialize();
 
   void HideAllWindows();
   void ShowAllWindows();
-  void UpdateLayout(const commands::RendererCommand &command);
+  void UpdateLayout(const commands::RendererCommand& command);
   bool Activate();
   bool IsAvailable() const;
-  bool ExecCommand(const commands::RendererCommand &command);
+  bool ExecCommand(const commands::RendererCommand& command);
   bool SetSendCommandInterface(
-      client::SendCommandInterface *send_command_interface);
+      client::SendCommandInterface* send_command_interface);
   void SetWindowPos(int x, int y);
 
  protected:
   // If this function returns true, we should show/reload candidate window.
-  bool ShouldShowCandidateWindow(const commands::RendererCommand &command);
+  bool ShouldShowCandidateWindow(const commands::RendererCommand& command);
 
   // Judges whether infolist should be shown or not.
-  bool ShouldShowInfolistWindow(const commands::RendererCommand &command);
+  bool ShouldShowInfolistWindow(const commands::RendererCommand& command);
 
   // Updates candidate window size and location based on given command, and
   // returns actual rectangle.
-  Rect UpdateCandidateWindow(const commands::RendererCommand &command);
+  Rect UpdateCandidateWindow(const commands::RendererCommand& command);
 
   // Updates infolist window size and location based on given command and
   // candidate window rectangle.
-  void UpdateInfolistWindow(const commands::RendererCommand &command,
-                            const Rect &candidate_window_rect);
+  void UpdateInfolistWindow(const commands::RendererCommand& command,
+                            const Rect& candidate_window_rect);
 
   // Returns monitor rectangle for the specified point.
   Rect GetMonitorRect(int x, int y);
 
-  Point GetWindowPosition(const commands::RendererCommand &command,
-                          const Size &win_size);
+  Point GetWindowPosition(const commands::RendererCommand& command,
+                          const Size& win_size);
 
   void OnClicked(int row, int column);
 
@@ -117,8 +117,8 @@ class QtWindowManager {
   void ApplyStyleToWidgets();
 
  private:
-  QTableWidget *candidates_ = nullptr;
-  QTableWidget *infolist_ = nullptr;
+  QTableWidget* candidates_ = nullptr;
+  QTableWidget* infolist_ = nullptr;
 
   // Does not have the ownership. `footer_delegate_` is a child QObject of
   // `candidates_`, which is responsible for destroying it.
@@ -126,7 +126,7 @@ class QtWindowManager {
 
   RendererStyle style_;
   commands::RendererCommand prev_command_;
-  client::SendCommandInterface *send_command_interface_ = nullptr;
+  client::SendCommandInterface* send_command_interface_ = nullptr;
 };
 
 }  // namespace renderer
