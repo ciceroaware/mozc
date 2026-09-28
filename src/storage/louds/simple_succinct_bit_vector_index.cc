@@ -83,6 +83,80 @@ class ZeroBitIndexIterator {
   const int* ptr_;
 };
 
+// Block size in bytes of the branchless select fast path below.  The default
+// chunk size of the index is one block.
+constexpr int kSelectBlockSize = 32;
+
+constexpr uint64_t kOnesStep8 = 0x0101010101010101ULL;
+constexpr uint64_t kMsbsStep8 = 0x8080808080808080ULL;
+
+// kSelectInByte[b][r] is the position (0-7) of the r-th (0-based) 1-bit of
+// the byte b.  Entries with r >= popcount(b) are unused.
+struct SelectInByteTable {
+  constexpr SelectInByteTable() : table() {
+    for (int b = 0; b < 256; ++b) {
+      int r = 0;
+      for (int i = 0; i < 8; ++i) {
+        if ((b >> i) & 1) {
+          table[b][r++] = i;
+        }
+      }
+    }
+  }
+  uint8_t table[256][8];
+};
+constexpr SelectInByteTable kSelectInByte;
+
+// Returns the position (0-63) of the k-th (0-based) 1-bit of |x| without any
+// branch or loop (broadword select).
+//
+// REQUIRES: k < std::popcount(x).
+inline int SelectInWord(uint64_t x, int k) {
+  DCHECK_GE(k, 0);
+  DCHECK_LT(k, std::popcount(x));
+
+  // Popcount of each byte.
+  uint64_t s = x - ((x >> 1) & 0x5555555555555555ULL);
+  s = (s & 0x3333333333333333ULL) + ((s >> 2) & 0x3333333333333333ULL);
+  s = (s + (s >> 4)) & 0x0F0F0F0F0F0F0F0FULL;
+  // Byte i now holds the popcount of bytes 0..i (all values are < 128).
+  const uint64_t sums = s * kOnesStep8;
+  // The MSB of byte i is set iff sums_i <= k, i.e. the k-th bit is beyond
+  // byte i.  No borrow crosses a byte boundary because sums_i <= 64 < 128.
+  const uint64_t k_step8 = static_cast<uint64_t>(k) * kOnesStep8;
+  const uint64_t byte_flags = ((k_step8 | kMsbsStep8) - sums) & kMsbsStep8;
+  // The number of flagged bytes, summed into the top byte by a multiply.
+  const int shift =
+      static_cast<int>(((byte_flags >> 7) * kOnesStep8) >> 56) * 8;
+  // Rank of the target bit inside its byte.
+  const int rank = k - static_cast<int>(((sums << 8) >> shift) & 0xFF);
+  return shift + kSelectInByte.table[(x >> shift) & 0xFF][rank];
+}
+
+// Returns the position (0-255) of the n-th (1-based) 1-bit (or 0-bit if
+// |kInvert|) of the 32-byte block at |block|, without any branch or loop.
+//
+// REQUIRES: 1 <= n <= the number of such bits in the block.
+template <bool kInvert>
+inline int SelectInBlock(const uint8_t* block, int n) {
+  uint64_t words[4];
+  for (int i = 0; i < 4; ++i) {
+    const uint64_t w = LoadUnaligned<uint64_t>(block + 8 * i);
+    words[i] = kInvert ? ~w : w;
+  }
+  // preceding[i] is the number of bits in the words before word i.
+  int preceding[4];
+  preceding[0] = 0;
+  for (int i = 1; i < 4; ++i) {
+    preceding[i] = preceding[i - 1] + std::popcount(words[i - 1]);
+  }
+  // Index of the word that contains the n-th bit.  Indexing small local
+  // arrays instead of chaining conditionals keeps this free of data
+  // dependent branches.
+  const int k = (preceding[1] < n) + (preceding[2] < n) + (preceding[3] < n);
+  return k * 64 + SelectInWord(words[k], n - preceding[k] - 1);
+}
+
 inline int BitCount0(uint32_t x) {
   // Flip all bits, and count 1-bits.
   return std::popcount(~x);
@@ -242,8 +316,13 @@ int SimpleSuccinctBitVectorIndex::Select0(int n) const {
   DCHECK_GE(chunk_index, 0);
   n -= chunk_size_ * 8 * chunk_index - index_[chunk_index];
 
-  // Linear search on remaining "words"
   const int offset = (chunk_index * chunk_size_) & ~int{3};
+  if (chunk_size_ == kSelectBlockSize && offset + kSelectBlockSize <= length_) {
+    return offset * 8 + SelectInBlock<true>(data_ + offset, n);
+  }
+
+  // Generic path for other chunk sizes and for a partial last chunk.
+  // Linear search on remaining "words"
   const uint8_t* ptr = data_ + offset;
   while (true) {
     const int bit_count = BitCount0(LoadUnaligned<uint32_t>(ptr));
@@ -280,8 +359,13 @@ int SimpleSuccinctBitVectorIndex::Select1(int n) const {
   DCHECK_GE(chunk_index, 0);
   n -= index_[chunk_index];
 
-  // Linear search on remaining "words"
   const int offset = (chunk_index * chunk_size_) & ~int{3};
+  if (chunk_size_ == kSelectBlockSize && offset + kSelectBlockSize <= length_) {
+    return offset * 8 + SelectInBlock<false>(data_ + offset, n);
+  }
+
+  // Generic path for other chunk sizes and for a partial last chunk.
+  // Linear search on remaining "words"
   const uint8_t* ptr = data_ + offset;
   while (true) {
     const int bit_count = std::popcount(LoadUnaligned<uint32_t>(ptr));
