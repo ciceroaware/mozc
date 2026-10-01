@@ -36,6 +36,7 @@
 #include <iterator>
 #include <vector>
 
+#include "absl/base/attributes.h"
 #include "absl/log/check.h"
 #include "absl/types/span.h"
 #include "base/bits.h"
@@ -44,6 +45,17 @@ namespace mozc {
 namespace storage {
 namespace louds {
 namespace {
+
+// Select0 and Select1 keep two small arrays on the stack (see SelectInChunk),
+// which makes compilers with a "strong" stack protector, e.g. clang-cl with
+// its default /GS, guard the frame with a stack cookie. The arrays are indexed
+// only with values in [0, 3] computed from booleans, so the guard cannot fire
+// and just costs a load, a store and a compare per query.
+#if ABSL_HAVE_ATTRIBUTE(no_stack_protector)
+#define MOZC_LOUDS_NO_STACK_PROTECTOR __attribute__((no_stack_protector))
+#else
+#define MOZC_LOUDS_NO_STACK_PROTECTOR
+#endif
 
 // The size of a chunk in bytes. The index stores the cumulative number of
 // 1-bits at the beginning of each chunk.
@@ -287,6 +299,7 @@ int SimpleSuccinctBitVectorIndex::Rank1(int n) const {
   return result;
 }
 
+MOZC_LOUDS_NO_STACK_PROTECTOR
 int SimpleSuccinctBitVectorIndex::Select0(int n) const {
   DCHECK_GT(n, 0);
 
@@ -333,6 +346,7 @@ int SimpleSuccinctBitVectorIndex::Select0(int n) const {
   return (ptr - data_) * 8 + std::countr_zero(word);
 }
 
+MOZC_LOUDS_NO_STACK_PROTECTOR
 int SimpleSuccinctBitVectorIndex::Select1(int n) const {
   DCHECK_GT(n, 0);
 
@@ -379,3 +393,5 @@ int SimpleSuccinctBitVectorIndex::Select1(int n) const {
 }  // namespace louds
 }  // namespace storage
 }  // namespace mozc
+
+#undef MOZC_LOUDS_NO_STACK_PROTECTOR
