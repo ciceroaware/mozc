@@ -30,6 +30,7 @@
 #include "converter/connector.h"
 
 #include <atomic>
+#include <bit>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -46,7 +47,6 @@
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
 #include "base/bits.h"
-#include "storage/louds/simple_succinct_bit_vector_index.h"
 
 namespace mozc {
 namespace {
@@ -131,23 +131,42 @@ absl::StatusOr<Metadata> ParseMetadata(const char* connection_data,
 void Connector::Row::Init(const uint8_t* chunk_bits, size_t chunk_bits_size,
                           const uint8_t* compact_bits, size_t compact_bits_size,
                           const uint8_t* values, bool use_1byte_value) {
-  chunk_bits_index_.Init(chunk_bits, chunk_bits_size);
-  compact_bits_index_.Init(compact_bits, compact_bits_size);
+  chunk_bits_index_.set_data(chunk_bits);
+  compact_bits_index_.set_data(compact_bits);
   values_ = values;
+  chunk_bits_size_ = static_cast<uint16_t>(chunk_bits_size);
+  compact_bits_size_ = static_cast<uint16_t>(compact_bits_size);
   use_1byte_value_ = use_1byte_value;
 }
 
+uint16_t* Connector::Row::BuildIndex(uint16_t* index) {
+  index = chunk_bits_index_.BuildIndex(chunk_bits_size_, index);
+  return compact_bits_index_.BuildIndex(compact_bits_size_, index);
+}
+
+uint16_t* Connector::Row::RankBitVector::BuildIndex(size_t length,
+                                                    uint16_t* index) {
+  rank_ = index;
+  const size_t num_words = length / 4;
+  uint32_t num_bits = 0;
+  for (size_t i = 0; i < num_words; ++i) {
+    index[i] = num_bits;
+    num_bits += std::popcount(LoadUnaligned<uint32_t>(data_ + 4 * i));
+  }
+  return index + num_words;
+}
+
 std::optional<uint16_t> Connector::Row::GetValue(uint16_t index) const {
-  int chunk_bit_position = index / 8;
-  if (!chunk_bits_index_.Get(chunk_bit_position)) {
+  const std::optional<int> chunk_rank = chunk_bits_index_.Rank1IfSet(index / 8);
+  if (!chunk_rank.has_value()) {
     return std::nullopt;
   }
-  int compact_bit_position =
-      chunk_bits_index_.Rank1(chunk_bit_position) * 8 + index % 8;
-  if (!compact_bits_index_.Get(compact_bit_position)) {
+  const std::optional<int> compact_rank =
+      compact_bits_index_.Rank1IfSet(*chunk_rank * 8 + index % 8);
+  if (!compact_rank.has_value()) {
     return std::nullopt;
   }
-  int value_position = compact_bits_index_.Rank1(compact_bit_position);
+  const int value_position = *compact_rank;
   uint16_t value;
   if (use_1byte_value_) {
     value = values_[value_position];
@@ -267,6 +286,18 @@ absl::Status Connector::Init(absl::string_view connection_data) {
                   values, metadata->Use1ByteValue());
   }
   VALIDATE_SIZE(ptr, 0, "Data end");
+
+  // Allocate the storage for the rank indices of all rows at once, exactly as
+  // large as needed, and build them.
+  size_t index_size = 0;
+  for (const Row& row : rows_) {
+    index_size += row.IndexSize();
+  }
+  rank_index_ = std::make_unique<uint16_t[]>(index_size);
+  uint16_t* index = rank_index_.get();
+  for (Row& row : rows_) {
+    index = row.BuildIndex(index);
+  }
   return absl::Status();
 
 #undef VALIDATE_ALIGNMENT
