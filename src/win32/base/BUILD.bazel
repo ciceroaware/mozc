@@ -317,6 +317,7 @@ mozc_cc_library(
         "//bazel/win32:user32",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/types:span",
         "@com_microsoft_wil//:wil",
     ],
 )

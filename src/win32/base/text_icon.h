@@ -31,9 +31,11 @@
 #define MOZC_WIN32_BASE_TEXT_ICON_H_
 
 #include <stddef.h>
+#include <stdint.h>
 #include <windows.h>
 
 #include "absl/strings/string_view.h"
+#include "absl/types/span.h"
 
 namespace mozc {
 namespace win32 {
@@ -43,8 +45,22 @@ class TextIcon {
   TextIcon() = delete;
   ~TextIcon() = delete;
 
-  // Returns a monochrome icon with rendering |text| by using given |fontname|
-  // and |text_color|.
+  // Specifies how the size of the text is determined.
+  enum class Scaling {
+    // The em height of the font is the same as the icon height. The font gets
+    // smaller only when the ink box of the text does not fit into the icon.
+    // This is suitable for symbol fonts, where each glyph is designed to be
+    // placed in the em box.
+    kEmHeight,
+    // The font size is adjusted so that the ink box of the text fits into the
+    // icon as large as possible.
+    kFitInkBox,
+  };
+
+  // Returns a single-color icon with rendering |text| by using given |fontname|
+  // and |text_color|. The text is anti-aliased with 32-bpp alpha channel, and
+  // centered in the icon based on its ink box. |opacity| is the alpha value of
+  // the pixels that are fully covered by the text, where 255 means opaque.
   // The returned icon consists of color bitmap (a.k.a. XOR bitmap) and mask
   // bitmap (a.k.a. AND bitmap). This is mainly because ITfLangBarMgr causes
   // GDI handle leak when ITfLangBarItemButton::GetIcon returns an icon which
@@ -52,7 +68,16 @@ class TextIcon {
   static HICON CreateMonochromeIcon(size_t width, size_t height,
                                     absl::string_view text,
                                     absl::string_view fontname,
-                                    COLORREF text_color);
+                                    COLORREF text_color, uint8_t opacity,
+                                    Scaling scaling);
+
+  // Does the same thing as above with the first font in |fontnames| that is
+  // available and has all the glyphs to render |text|. Returns nullptr when
+  // there is no such font.
+  static HICON CreateMonochromeIcon(
+      size_t width, size_t height, absl::string_view text,
+      absl::Span<const absl::string_view> fontnames, COLORREF text_color,
+      uint8_t opacity, Scaling scaling);
 };
 
 }  // namespace win32

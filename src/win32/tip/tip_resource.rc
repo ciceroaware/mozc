@@ -29,14 +29,6 @@ LANGUAGE LANG_JAPANESE, SUBLANG_DEFAULT
 // Icon with lowest ID value placed first to ensure application icon
 // remains consistent on all systems.
 IDI_IMM32                 ICON       "data/images/win/product_icon_langbar.ico"
-IDI_DIRECT                ICON       "data/images/win/ms_direct_input_a.ico"
-IDI_HIRAGANA              ICON       "data/images/win/ms_hiragana_a.ico"
-IDI_FULL_KATAKANA         ICON       "data/images/win/ms_katakana_a.ico"
-IDI_HALF_ALPHANUMERIC     ICON       "data/images/win/ms_alpha_half_a.ico"
-IDI_FULL_ALPHANUMERIC     ICON       "data/images/win/ms_alpha_a.ico"
-IDI_HALF_KATAKANA         ICON       "data/images/win/ms_katakana_half_a.ico"
-IDI_DISABLED              ICON       "data/images/win/ms_disabled_a.ico"
-IDI_DISABLED_NT           ICON       "data/images/win/ms_disabled.ico"
 
 #ifdef APSTUDIO_INVOKED
 /////////////////////////////////////////////////////////////////////////////

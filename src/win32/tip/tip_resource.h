@@ -53,20 +53,16 @@
 // Historically, the TSF version of Mozc used the resource ID 102 for showing
 // IMM32 icon.  For this reason, we keep this ID for the product icon.
 #define IDI_IMM32 102
+
+// The following IDs do not have corresponding icon resources. The icons are
+// rendered on-the-fly.
 #define IDI_DIRECT 112
-#define IDI_DIRECT_NT 103
 #define IDI_HIRAGANA 104
-#define IDI_HIRAGANA_NT 105
 #define IDI_FULL_KATAKANA 114
-#define IDI_FULL_KATAKANA_NT 115
 #define IDI_HALF_ALPHANUMERIC 116
-#define IDI_HALF_ALPHANUMERIC_NT 117
 #define IDI_FULL_ALPHANUMERIC 118
-#define IDI_FULL_ALPHANUMERIC_NT 119
 #define IDI_HALF_KATAKANA 120
-#define IDI_HALF_KATAKANA_NT 121
 #define IDI_DISABLED 122
-#define IDI_DISABLED_NT 123
 
 // Next default values for new objects
 //

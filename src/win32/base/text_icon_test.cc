@@ -145,7 +145,8 @@ class TextIconTest : public testing::Test {
 TEST_F(TextIconTest, CreateMonochromeIcon) {
   constexpr size_t kIconSize = 20;
   wil::unique_hicon icon(TextIcon::CreateMonochromeIcon(
-      kIconSize, kIconSize, "A", GetTestFontName(), RGB(0xff, 0x00, 0xff)));
+      kIconSize, kIconSize, "A", GetTestFontName(), RGB(0xff, 0x00, 0xff),
+      0xff, TextIcon::Scaling::kFitInkBox));
   EXPECT_TRUE(ExpectMonochromeIcon(icon, kIconSize));
 }
 

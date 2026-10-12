@@ -96,37 +96,33 @@ HRESULT TipLangBar::InitLangBar(TipLangBarCallback* text_service) {
   }
 
   const TipLangBarMenuItem kInputMenuDisabled = {kTipLangBarItemTypeDefault, 0,
-                                                 IDS_DISABLED, IDI_DISABLED_NT,
-                                                 IDI_DISABLED};
+                                                 IDS_DISABLED, IDI_DISABLED};
 
   if (!input_mode_button_for_win8_) {
     // Add the "Input Mode" button.
     constexpr TipLangBarMenuItem kInputMenu[] = {
         {kTipLangBarItemTypeDefault, TipLangBarCallback::kHiragana,
-         IDS_HIRAGANA, IDI_HIRAGANA_NT, IDI_HIRAGANA},
+         IDS_HIRAGANA, IDI_HIRAGANA},
         {kTipLangBarItemTypeDefault, TipLangBarCallback::kFullKatakana,
-         IDS_FULL_KATAKANA, IDI_FULL_KATAKANA_NT, IDI_FULL_KATAKANA},
+         IDS_FULL_KATAKANA, IDI_FULL_KATAKANA},
         {kTipLangBarItemTypeDefault, TipLangBarCallback::kFullAlphanumeric,
-         IDS_FULL_ALPHANUMERIC, IDI_FULL_ALPHANUMERIC_NT,
-         IDI_FULL_ALPHANUMERIC},
+         IDS_FULL_ALPHANUMERIC, IDI_FULL_ALPHANUMERIC},
         {kTipLangBarItemTypeDefault, TipLangBarCallback::kHalfKatakana,
-         IDS_HALF_KATAKANA, IDI_HALF_KATAKANA_NT, IDI_HALF_KATAKANA},
+         IDS_HALF_KATAKANA, IDI_HALF_KATAKANA},
         {kTipLangBarItemTypeDefault, TipLangBarCallback::kHalfAlphanumeric,
-         IDS_HALF_ALPHANUMERIC, IDI_HALF_ALPHANUMERIC_NT,
-         IDI_HALF_ALPHANUMERIC},
+         IDS_HALF_ALPHANUMERIC, IDI_HALF_ALPHANUMERIC},
         {kTipLangBarItemTypeDefault, TipLangBarCallback::kDirect, IDS_DIRECT,
-         IDI_DIRECT_NT, IDI_DIRECT},
-        {kTipLangBarItemTypeSeparator, 0, 0, 0, 0},
+         IDI_DIRECT},
+        {kTipLangBarItemTypeSeparator, 0, 0, 0},
         {kTipLangBarItemTypeDefault, TipLangBarCallback::kDictionary,
-         IDS_DICTIONARY, 0, 0},
+         IDS_DICTIONARY, 0},
         {kTipLangBarItemTypeDefault, TipLangBarCallback::kWordRegister,
-         IDS_WORD_REGISTER, 0, 0},
+         IDS_WORD_REGISTER, 0},
         {kTipLangBarItemTypeDefault, TipLangBarCallback::kProperty,
-         IDS_PROPERTY, 0, 0},
-        {kTipLangBarItemTypeSeparator, 0, 0, 0, 0},
-        {kTipLangBarItemTypeDefault, TipLangBarCallback::kAbout, IDS_ABOUT, 0,
-         0},
-        {kTipLangBarItemTypeDefault, TipLangBarCallback::kHelp, IDS_HELP, 0, 0},
+         IDS_PROPERTY, 0},
+        {kTipLangBarItemTypeSeparator, 0, 0, 0},
+        {kTipLangBarItemTypeDefault, TipLangBarCallback::kAbout, IDS_ABOUT, 0},
+        {kTipLangBarItemTypeDefault, TipLangBarCallback::kHelp, IDS_HELP, 0},
     };
 
     constexpr bool kNonMenuButton = false;

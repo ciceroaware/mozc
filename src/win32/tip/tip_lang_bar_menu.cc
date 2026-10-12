@@ -43,16 +43,18 @@
 
 #include <algorithm>
 #include <cstddef>
-#include <string>
+#include <cstdint>
+#include <iterator>
 #include <utility>
 
 #include "absl/base/casts.h"
 #include "absl/base/macros.h"
+#include "absl/strings/string_view.h"
+#include "absl/types/span.h"
 #include "base/win32/com.h"
 #include "base/win32/com_implements.h"
 #include "win32/base/text_icon.h"
 #include "win32/base/tsf_profile.h"
-#include "win32/tip/tip_dll_module.h"
 #include "win32/tip/tip_lang_bar_callback.h"
 #include "win32/tip/tip_resource.h"
 
@@ -71,44 +73,136 @@ namespace {
 constexpr int kTipLangBarMenuCookie =
     (('M' << 24) | ('o' << 16) | ('z' << 8) | ('c' << 0));
 
-constexpr char kTextIconFont[] = "ＭＳ ゴシック";
+// Symbol fonts that have glyphs for IME modes in the Private Use Area. "Segoe
+// Fluent Icons" is available on Windows 11 and later, and "Segoe MDL2 Assets"
+// is available on Windows 10 and later.
+// https://learn.microsoft.com/en-us/windows/apps/design/style/segoe-fluent-icons-font
+// https://learn.microsoft.com/en-us/windows/apps/design/style/segoe-ui-symbol-font
+constexpr absl::string_view kSymbolFonts[] = {
+    "Segoe Fluent Icons",
+    "Segoe MDL2 Assets",
+};
+
+// Fonts to render Latin characters. Semilight is preferred because its stroke
+// width is close to that of the symbol fonts.
+constexpr absl::string_view kLatinFonts[] = {
+    "Segoe UI Semilight",
+    "Segoe UI",
+};
+
+// Fonts to render Kana characters and full-width alphanumeric characters.
+constexpr absl::string_view kKanaFonts[] = {
+    "Yu Gothic UI Semilight",
+    "Yu Gothic UI",
+    "Meiryo UI",
+    "MS UI Gothic",
+};
+
+// The font that is used when none of the above fonts is available. We rely on
+// the font linking for the characters that this font does not have.
+constexpr absl::string_view kLastResortFont = "Segoe UI";
+
+// Represents how to render an icon for the input mode button.
+struct TextIconInfo {
+  UINT icon_id;
+  // A character in |kSymbolFonts|. Can be empty when there is no symbol that
+  // is semantically the same as the input mode.
+  absl::string_view symbol;
+  // Used when |symbol| is empty or cannot be rendered.
+  absl::string_view text;
+  absl::Span<const absl::string_view> text_fonts;
+};
 
 // TODO(yukawa): Refactor LangBar code so that we can configure following
 // settings as a part of initialization.
-std::string GetIconStringIfNecessary(UINT icon_id) {
-  switch (icon_id) {
-    case IDI_DIRECT_NT:
-      return "A";
-    case IDI_HIRAGANA_NT:
-      return "あ";
-    case IDI_FULL_KATAKANA_NT:
-      return "ア";
-    case IDI_HALF_ALPHANUMERIC_NT:
-      return "_A";
-    case IDI_FULL_ALPHANUMERIC_NT:
-      return "Ａ";
-    case IDI_HALF_KATAKANA_NT:
-      return "_ｱ";
+constexpr TextIconInfo kTextIcons[] = {
+    {IDI_DIRECT, "\uE97E" /* HalfAlpha */, "A", kLatinFonts},
+    {IDI_HIRAGANA, "\uE986" /* FullHiragana */, "あ", kKanaFonts},
+    {IDI_FULL_KATAKANA, "", "ア", kKanaFonts},
+    {IDI_HALF_ALPHANUMERIC, "", "_A", kLatinFonts},
+    {IDI_FULL_ALPHANUMERIC, "\uE97F" /* FullAlpha */, "Ａ", kKanaFonts},
+    {IDI_HALF_KATAKANA, "", "_ｱ", kKanaFonts},
+    {IDI_DISABLED, "\uE711" /* Cancel */, "×", kLatinFonts},
+};
+
+struct TextIconColor {
+  COLORREF color;
+  uint8_t opacity;
+};
+
+// Returns the color that is appropriate to draw the mode icon on the taskbar.
+TextIconColor GetTextIconColor() {
+  HIGHCONTRAST high_contrast = {};
+  high_contrast.cbSize = sizeof(high_contrast);
+  if (::SystemParametersInfoW(SPI_GETHIGHCONTRAST, sizeof(high_contrast),
+                              &high_contrast, 0) &&
+      (high_contrast.dwFlags & HCF_HIGHCONTRASTON) != 0) {
+    return {::GetSysColor(COLOR_WINDOWTEXT), 0xff};
   }
-  return "";
+
+  // The taskbar follows the system theme rather than the app theme. Note that
+  // the taskbar is dark when this value does not exist.
+  DWORD light_theme = 0;
+  DWORD size = sizeof(light_theme);
+  const LSTATUS result = ::RegGetValueW(
+      HKEY_CURRENT_USER,
+      L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
+      L"SystemUsesLightTheme", RRF_RT_REG_DWORD, nullptr, &light_theme, &size);
+  if (result == ERROR_SUCCESS && light_theme != 0) {
+    // The same as the primary text color in the light theme (#E4000000), which
+    // is what the mode icon of MS-IME looks to be drawn with.
+    return {RGB(0x00, 0x00, 0x00), 0xe4};
+  }
+  return {RGB(0xff, 0xff, 0xff), 0xff};
 }
 
-// Loads an icon which is appropriate for the current theme.
-// An icon ID 0 represents "no icon".
-HICON LoadIconFromResource(HINSTANCE instance, UINT icon_id) {
-  const auto icon_size = ::GetSystemMetrics(SM_CYSMICON);
+// Returns the size of the mode icon in physical pixels. Note that this code
+// runs in the process of the focused application, which is not always
+// DPI-aware. If we relied on the DPI awareness of the process, the taskbar
+// would need to stretch a small icon, which results in a blurred icon.
+int GetTextIconSize() {
+  const DPI_AWARENESS_CONTEXT original_context = ::SetThreadDpiAwarenessContext(
+      DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+  if (original_context == nullptr) {
+    return ::GetSystemMetrics(SM_CYSMICON);
+  }
+  const int icon_size =
+      ::GetSystemMetricsForDpi(SM_CYSMICON, ::GetDpiForSystem());
+  ::SetThreadDpiAwarenessContext(original_context);
+  return icon_size;
+}
 
-  // Replace some text icons with on-the-fly image drawn with MS-Gothic.
-  const auto& icon_text = GetIconStringIfNecessary(icon_id);
-  if (!icon_text.empty()) {
-    const COLORREF text_color = ::GetSysColor(COLOR_WINDOWTEXT);
-    return TextIcon::CreateMonochromeIcon(icon_size, icon_size, icon_text,
-                                          kTextIconFont, text_color);
+// Returns an icon rendered on-the-fly for |icon_id|, which is appropriate for
+// the current theme. Returns nullptr when |icon_id| is unknown.
+HICON CreateTextIcon(UINT icon_id) {
+  const auto* info =
+      std::find_if(std::begin(kTextIcons), std::end(kTextIcons),
+                   [icon_id](const TextIconInfo& info) {
+                     return info.icon_id == icon_id;
+                   });
+  if (info == std::end(kTextIcons)) {
+    return nullptr;
   }
 
-  return static_cast<HICON>(::LoadImage(instance, MAKEINTRESOURCE(icon_id),
-                                        IMAGE_ICON, icon_size, icon_size,
-                                        LR_CREATEDIBSECTION));
+  const int icon_size = GetTextIconSize();
+  const TextIconColor color = GetTextIconColor();
+  if (!info->symbol.empty()) {
+    const HICON icon = TextIcon::CreateMonochromeIcon(
+        icon_size, icon_size, info->symbol, kSymbolFonts, color.color,
+        color.opacity, TextIcon::Scaling::kEmHeight);
+    if (icon != nullptr) {
+      return icon;
+    }
+  }
+  const HICON icon = TextIcon::CreateMonochromeIcon(
+      icon_size, icon_size, info->text, info->text_fonts, color.color,
+      color.opacity, TextIcon::Scaling::kFitInkBox);
+  if (icon != nullptr) {
+    return icon;
+  }
+  return TextIcon::CreateMonochromeIcon(
+      icon_size, icon_size, info->text, kLastResortFont, color.color,
+      color.opacity, TextIcon::Scaling::kFitInkBox);
 }
 
 }  // namespace
@@ -131,8 +225,7 @@ HRESULT TipLangBarMenuDataArray::Init(HINSTANCE instance,
     data.item_id_ = menu[i].item_id_;
     data.text_id_ = menu[i].text_id_;
     data.length_ = length;
-    data.icon_id_for_non_theme_ = menu[i].icon_id_for_non_theme_;
-    data.icon_id_for_theme_ = menu[i].icon_id_for_theme_;
+    data.icon_id_ = menu[i].icon_id_;
     data_.push_back(data);
   }
 
@@ -437,37 +530,12 @@ STDMETHODIMP TipLangBarToggleButton::QueryInterface(REFIID interface_id,
 // Implements the ITfLangBarItem::GetInfo() function.
 // This function is called by Windows to update this button menu.
 STDMETHODIMP TipLangBarToggleButton::GetInfo(TF_LANGBARITEMINFO* item_info) {
-  HRESULT result = S_OK;
-
   if (item_info == nullptr) {
     return E_INVALIDARG;
   }
 
   // Just copies the cached TF_LANGBARITEMINFO object.
   *item_info = *this->item_info();
-
-  if (FAILED(result)) {
-    return result;
-  }
-
-  wil::unique_hicon icon;
-  if (FAILED(GetIcon(icon.put())) || !icon.is_valid()) {
-    return S_OK;
-  }
-
-  ICONINFO icon_info = {};
-  const BOOL get_icon_succeeded = ::GetIconInfo(icon.get(), &icon_info);
-  wil::unique_hbitmap color(icon_info.hbmColor);
-  wil::unique_hbitmap mask(icon_info.hbmMask);
-  if (!get_icon_succeeded) {
-    return S_OK;
-  }
-
-  if (!color.is_valid() && mask.is_valid()) {
-    item_info->dwStyle |= TF_LBI_STYLE_TEXTCOLORICON;
-    return S_OK;
-  }
-
   return S_OK;
 }
 
@@ -530,8 +598,7 @@ STDMETHODIMP TipLangBarToggleButton::GetIcon(HICON* icon) {
   //  Excerpt: http://msdn.microsoft.com/en-us/library/ms628718.aspx
   //  The caller must free this icon when it is no longer required by
   //  calling DestroyIcon.
-  *icon = LoadIconFromResource(TipDllModule::module_handle(),
-                               data.icon_id_for_theme_);
+  *icon = CreateTextIcon(data.icon_id_);
   return (*icon ? S_OK : E_FAIL);
 }
 

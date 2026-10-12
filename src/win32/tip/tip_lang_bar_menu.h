@@ -80,8 +80,7 @@ struct TipLangBarMenuItem {
   int flags_;
   UINT item_id_;
   UINT text_id_;
-  UINT icon_id_for_non_theme_;
-  UINT icon_id_for_theme_;
+  UINT icon_id_;
 };
 
 // Represents the data possessed internally by a language bar menu item.
@@ -89,8 +88,7 @@ struct TipLangBarMenuData {
   int flags_;
   UINT item_id_;
   UINT text_id_;
-  UINT icon_id_for_non_theme_;
-  UINT icon_id_for_theme_;
+  UINT icon_id_;
   int length_;
   wchar_t text_[TF_LBI_DESC_MAXLEN];
 };

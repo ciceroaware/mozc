@@ -394,6 +394,8 @@ mozc_cc_library(
         "//win32/base:tsf_profile",
         "@com_google_absl//absl/base",
         "@com_google_absl//absl/base:core_headers",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/types:span",
         "@com_microsoft_wil//:wil",
     ],
 )

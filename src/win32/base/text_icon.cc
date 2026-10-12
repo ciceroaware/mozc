@@ -33,14 +33,15 @@
 #include <wil/resource.h>
 #include <windows.h>
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
-#include <cstring>
 #include <memory>
 #include <string>
 
 #include "absl/log/log.h"
 #include "absl/strings/string_view.h"
+#include "absl/types/span.h"
 #include "base/win32/wide_char.h"
 
 namespace mozc {
@@ -50,171 +51,258 @@ namespace {
 using ::msl::utilities::SafeCast;
 using ::msl::utilities::SafeMultiply;
 
-RGBQUAD ToRGBQuad(DWORD color_ref) {
-  const RGBQUAD rgbquad = {GetBValue(color_ref), GetGValue(color_ref),
-                           GetRValue(color_ref), 0xff};
-  return rgbquad;
+// The text is first rendered into a 1-bpp bitmap that is |kSupersamplingScale|
+// times larger than the icon, then the coverage of each icon pixel is used as
+// its alpha value. This gives us anti-aliased glyphs that do not depend on the
+// system font smoothing settings.
+constexpr int kSupersamplingScale = 8;
+
+struct MonochromeBitmapInfo {
+  BITMAPINFOHEADER header;
+  RGBQUAD color_palette[2];
+};
+
+// Returns true if the font specified by |fontname| is available and has all
+// the glyphs to render |text|. Note that GDI silently picks up another font
+// when the specified font is not available.
+bool HasAllGlyphs(const std::wstring& fontname, const std::wstring& text) {
+  if (fontname.empty() || fontname.size() >= LF_FACESIZE || text.empty()) {
+    return false;
+  }
+  wil::unique_hdc dc(::CreateCompatibleDC(nullptr));
+  if (!dc.is_valid()) {
+    return false;
+  }
+  LOGFONT logfont = {};
+  logfont.lfWeight = FW_NORMAL;
+  logfont.lfCharSet = DEFAULT_CHARSET;
+  logfont.lfHeight = -16;
+  if (wcscpy_s(logfont.lfFaceName, fontname.c_str()) != 0) {
+    return false;
+  }
+  wil::unique_hfont font_handle(::CreateFontIndirect(&logfont));
+  if (!font_handle.is_valid()) {
+    return false;
+  }
+  wil::unique_select_object old_font(
+      wil::SelectObject(dc.get(), font_handle.get()));
+
+  wchar_t actual_fontname[LF_FACESIZE] = {};
+  if (::GetTextFaceW(dc.get(), LF_FACESIZE, actual_fontname) == 0 ||
+      ::_wcsicmp(actual_fontname, fontname.c_str()) != 0) {
+    return false;
+  }
+
+  auto glyph_indices = std::make_unique<WORD[]>(text.size());
+  const DWORD result =
+      ::GetGlyphIndicesW(dc.get(), text.c_str(), static_cast<int>(text.size()),
+                         glyph_indices.get(), GGI_MARK_NONEXISTING_GLYPHS);
+  if (result == GDI_ERROR) {
+    return false;
+  }
+  for (size_t i = 0; i < text.size(); ++i) {
+    if (glyph_indices[i] == 0xffff) {
+      return false;
+    }
+  }
+  return true;
 }
 
 HICON CreateMonochromeIconInternal(int bitmap_width, int bitmap_height,
                                    absl::string_view text,
-                                   absl::string_view fontname,
-                                   COLORREF text_color) {
-  struct MonochromeBitmapInfo {
-    BITMAPINFOHEADER header;
-    RGBQUAD color_palette[2];
-  };
+                                   const std::wstring& wide_fontname,
+                                   COLORREF text_color, uint8_t opacity,
+                                   TextIcon::Scaling scaling) {
+  if (bitmap_width <= 0 || bitmap_height <= 0) {
+    return nullptr;
+  }
 
-  uint8_t* src_dib_buffer = nullptr;
-  wil::unique_hbitmap src_dib;
-
-  // Step 1. Create a src black-and-white DIB as follows.
+  // Step 1. Create a large black-and-white DIB to render the text.
   //  - This is a top-down DIB.
-  //  - pixel bit is 0 if the pixel should be opaque for text image.
-  //  - pixel bit is 1 if the pixel should be transparent.
-  //  - |src_dib_buffer| is a 4-byte aligned bitmap image.
+  //  - pixel bit is 1 if the pixel is a part of the text.
+  //  - The canvas is twice as large as the supersampled icon so that the ink
+  //    box can be measured without being clipped.
+  const int canvas_width = bitmap_width * kSupersamplingScale * 2;
+  const int canvas_height = bitmap_height * kSupersamplingScale * 2;
+  const size_t canvas_stride = ((canvas_width + 31) / 32) * 4;
+  uint8_t* canvas_buffer = nullptr;
+  wil::unique_hbitmap canvas_dib;
   {
-    constexpr DWORD kBackgroundColor = RGB(0x00, 0x00, 0x00);
-    constexpr DWORD kForegroundColor = RGB(0xff, 0xff, 0xff);
-
     MonochromeBitmapInfo info = {};
     info.header.biSize = sizeof(info.header);
-    info.header.biWidth = bitmap_width;
-    info.header.biHeight = -bitmap_height;  // negavive value for top-down BMP
+    info.header.biWidth = canvas_width;
+    info.header.biHeight = -canvas_height;  // negative value for top-down BMP
     info.header.biPlanes = 1;
     info.header.biBitCount = 1;
     info.header.biCompression = BI_RGB;
-    info.header.biSizeImage = 0;
-    // Note: these color is not directly used for the final output. All we need
-    // to do here is to use different color and to make sure all the background
-    // pixels are filled with 1.
-    info.color_palette[0] = ToRGBQuad(kForegroundColor);
-    info.color_palette[1] = ToRGBQuad(kBackgroundColor);
+    info.color_palette[0] = {0x00, 0x00, 0x00, 0x00};
+    info.color_palette[1] = {0xff, 0xff, 0xff, 0x00};
 
-    src_dib.reset(::CreateDIBSection(
+    canvas_dib.reset(::CreateDIBSection(
         nullptr, reinterpret_cast<const BITMAPINFO*>(&info), DIB_RGB_COLORS,
-        reinterpret_cast<void**>(&src_dib_buffer), nullptr, 0));
-    if (!src_dib.is_valid()) {
+        reinterpret_cast<void**>(&canvas_buffer), nullptr, 0));
+    if (!canvas_dib.is_valid() || canvas_buffer == nullptr) {
       return nullptr;
     }
+  }
 
+  const auto is_ink = [&](int x, int y) -> bool {
+    if (x < 0 || y < 0 || x >= canvas_width || y >= canvas_height) {
+      return false;
+    }
+    return ((canvas_buffer[canvas_stride * y + x / 8] >> (7 - x % 8)) & 1) != 0;
+  };
+
+  const auto draw_text = [&](int font_height) -> bool {
     wil::unique_hdc dc(::CreateCompatibleDC(nullptr));
     if (!dc.is_valid()) {
-      return nullptr;
+      return false;
     }
 
     wil::unique_select_object old_bitmap(
-        wil::SelectObject(dc.get(), src_dib.get()));
+        wil::SelectObject(dc.get(), canvas_dib.get()));
     LOGFONT logfont = {};
     {
       logfont.lfWeight = FW_NORMAL;
       logfont.lfCharSet = DEFAULT_CHARSET;
-      logfont.lfHeight = bitmap_height;
+      // A negative value means the character height (em height).
+      logfont.lfHeight = -font_height;
       logfont.lfQuality = NONANTIALIASED_QUALITY;
-      const std::wstring wide_fontname = win32::Utf8ToWide(fontname);
       const errno_t error = wcscpy_s(logfont.lfFaceName, wide_fontname.c_str());
       if (error != 0) {
-        return nullptr;
+        return false;
       }
     }
 
     wil::unique_hfont font_handle(::CreateFontIndirect(&logfont));
     if (!font_handle.is_valid()) {
-      return nullptr;
+      return false;
     }
 
     wil::unique_select_object old_font(
         wil::SelectObject(dc.get(), font_handle.get()));
     ::SetBkMode(dc.get(), OPAQUE);
-    ::SetBkColor(dc.get(), kBackgroundColor);
-    ::SetTextColor(dc.get(), kForegroundColor);
+    ::SetBkColor(dc.get(), RGB(0x00, 0x00, 0x00));
+    ::SetTextColor(dc.get(), RGB(0xff, 0xff, 0xff));
     const std::wstring wide_text = win32::Utf8ToWide(text);
-    RECT rect = {0, 0, bitmap_width, bitmap_height};
+    RECT rect = {0, 0, canvas_width, canvas_height};
     ::ExtTextOutW(dc.get(), 0, 0, ETO_OPAQUE, &rect, nullptr, 0, nullptr);
     ::DrawTextW(dc.get(), wide_text.c_str(), wide_text.size(), &rect,
                 DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_CENTER);
     ::GdiFlush();
+    return true;
+  };
+
+  // Step 2. Draw the text and measure the ink box so that the text can be
+  // centered in the icon regardless of the font metrics. The em height of the
+  // font is the same as the icon height at first, then the text is drawn again
+  // with a different font size depending on |scaling| and the ink box.
+  const int target_width = bitmap_width * kSupersamplingScale;
+  const int target_height = bitmap_height * kSupersamplingScale;
+  constexpr int kMaxAttempts = 3;
+  int font_height = target_height;
+  int offset_x = 0;
+  int offset_y = 0;
+  for (int attempt = 0; attempt < kMaxAttempts; ++attempt) {
+    if (font_height <= 0 || !draw_text(font_height)) {
+      return nullptr;
+    }
+    int ink_left = canvas_width;
+    int ink_top = canvas_height;
+    int ink_right = -1;
+    int ink_bottom = -1;
+    for (int y = 0; y < canvas_height; ++y) {
+      for (int x = 0; x < canvas_width; ++x) {
+        if (!is_ink(x, y)) {
+          continue;
+        }
+        ink_left = std::min(ink_left, x);
+        ink_top = std::min(ink_top, y);
+        ink_right = std::max(ink_right, x);
+        ink_bottom = std::max(ink_bottom, y);
+      }
+    }
+    if (ink_right < ink_left || ink_bottom < ink_top) {
+      // Nothing was drawn.
+      break;
+    }
+    const int ink_width = ink_right - ink_left + 1;
+    const int ink_height = ink_bottom - ink_top + 1;
+    offset_x = (ink_left + ink_right + 1) / 2 - target_width / 2;
+    offset_y = (ink_top + ink_bottom + 1) / 2 - target_height / 2;
+    const bool fits = ink_width <= target_width && ink_height <= target_height;
+    if (fits && (attempt > 0 || scaling == TextIcon::Scaling::kEmHeight)) {
+      break;
+    }
+    const int new_font_height =
+        std::min(font_height * target_width / ink_width,
+                 font_height * target_height / ink_height);
+    if (new_font_height == font_height) {
+      break;
+    }
+    font_height = new_font_height;
   }
 
-  BITMAP src_bmp_info = {};
-  if (::GetObject(src_dib.get(), sizeof(src_bmp_info), &src_bmp_info) == 0) {
+  // Step 3. Create XOR bitmap.
+  //  - This is a top-down 32-bpp DIB with non-premultiplied alpha.
+  //  - The alpha value is the coverage of the text in the pixel multiplied by
+  //    |opacity|.
+  uint32_t* xor_dib_buffer = nullptr;
+  wil::unique_hbitmap xor_dib;
+  {
+    BITMAPINFO info = {};
+    info.bmiHeader.biSize = sizeof(info.bmiHeader);
+    info.bmiHeader.biWidth = bitmap_width;
+    info.bmiHeader.biHeight = -bitmap_height;  // top-down BMP
+    info.bmiHeader.biPlanes = 1;
+    info.bmiHeader.biBitCount = 32;
+    info.bmiHeader.biCompression = BI_RGB;
+    xor_dib.reset(::CreateDIBSection(nullptr, &info, DIB_RGB_COLORS,
+                                     reinterpret_cast<void**>(&xor_dib_buffer),
+                                     nullptr, 0));
+    if (!xor_dib.is_valid() || xor_dib_buffer == nullptr) {
+      return nullptr;
+    }
+  }
+
+  // Step 4. Fill XOR bitmap and AND bitmap.
+  //  - AND bitmap is a top-down DDB, each line of which is aligned to 2-byte.
+  //  - pixel bit is 1 if the pixel should be transparent.
+  const size_t mask_stride = (bitmap_width + 15) / 16 * 2;
+  auto mask_buffer = std::make_unique<uint8_t[]>(mask_stride * bitmap_height);
+  const uint32_t rgb = (static_cast<uint32_t>(GetRValue(text_color)) << 16) |
+                       (static_cast<uint32_t>(GetGValue(text_color)) << 8) |
+                       static_cast<uint32_t>(GetBValue(text_color));
+  constexpr int kSamplesPerPixel = kSupersamplingScale * kSupersamplingScale;
+  for (int y = 0; y < bitmap_height; ++y) {
+    for (int x = 0; x < bitmap_width; ++x) {
+      int count = 0;
+      for (int sub_y = 0; sub_y < kSupersamplingScale; ++sub_y) {
+        for (int sub_x = 0; sub_x < kSupersamplingScale; ++sub_x) {
+          if (is_ink(offset_x + x * kSupersamplingScale + sub_x,
+                     offset_y + y * kSupersamplingScale + sub_y)) {
+            ++count;
+          }
+        }
+      }
+      const uint32_t alpha = count * opacity / kSamplesPerPixel;
+      if (alpha == 0) {
+        // Keep the XOR pixel 0 so that the destination is not inverted even
+        // when the icon is drawn without using the alpha channel.
+        mask_buffer[mask_stride * y + x / 8] |= (0x80 >> (x % 8));
+      } else {
+        xor_dib_buffer[y * bitmap_width + x] = (alpha << 24) | rgb;
+      }
+    }
+  }
+
+  wil::unique_hbitmap mask_ddb(
+      ::CreateBitmap(bitmap_width, bitmap_height, 1, 1, mask_buffer.get()));
+  if (!mask_ddb.is_valid()) {
     return nullptr;
   }
 
-  // Step 2. Create XOR bitmap.
-  //  - This is a top-down DIB.
-  //  - pixel bit is 0 if the pixel should be opaque for text image.
-  //    - color palette for this pixel should be |text_color|.
-  //  - pixel bit is 1 if the pixel should be transparent.
-  //    - color palette for this pixel should be RGB(0, 0, 0), which has null
-  //      effect when XOR operation is done.
-  wil::unique_hbitmap xor_dib;
-  {
-    MonochromeBitmapInfo info = {};
-    info.header.biSize = sizeof(info.header);
-    info.header.biWidth = bitmap_width;
-    info.header.biHeight = -bitmap_height;  // negavive value for top-down BMP
-    info.header.biPlanes = 1;
-    info.header.biBitCount = 1;
-    info.header.biCompression = BI_RGB;
-    info.header.biSizeImage = 0;
-    // Foreground pixel: should be initialized with the given |text_color|.
-    info.color_palette[0] = ToRGBQuad(text_color);
-    // Background pixel: should be 0, which has null effect in XOR operation.
-    info.color_palette[1] = ToRGBQuad(0);
-
-    uint8_t* xor_dib_buffer = nullptr;
-    xor_dib.reset(::CreateDIBSection(
-        nullptr, reinterpret_cast<const BITMAPINFO*>(&info), DIB_RGB_COLORS,
-        reinterpret_cast<void**>(&xor_dib_buffer), nullptr, 0));
-    if (!xor_dib.is_valid()) {
-      return nullptr;
-    }
-
-    // Make sure that |xor_dib| and |src_dib| have the same pixel format.
-    BITMAP xor_dib_info = {};
-    if (!::GetObject(xor_dib.get(), sizeof(xor_dib_info), &xor_dib_info) ||
-        (xor_dib_info.bmBitsPixel != src_bmp_info.bmBitsPixel) ||
-        (xor_dib_info.bmWidthBytes != src_bmp_info.bmWidthBytes) ||
-        (xor_dib_info.bmHeight != src_bmp_info.bmHeight)) {
-      return nullptr;
-    }
-
-    // Here we should be able to copy the buffer safely.
-    const size_t data_len = bitmap_height * src_bmp_info.bmWidthBytes;
-    ::memcpy(xor_dib_buffer, src_dib_buffer, data_len);
-  }
-
-  // Step 3. Create AND bitmap.
-  //  - This is a top-down DDB.
-  //  - pixel bit is 0 if the pixel should be opaque for text image.
-  //  - pixel bit is 1 if the pixel should be transparent.
-  wil::unique_hbitmap mask_ddb;
-  {
-    // Note: each line should be aligned with 2-byte for DDB while DIB uses
-    // 4-byte alignment. Here we need to do alignment conversion.
-    const size_t mask_buffer_stride = (bitmap_width + 0x0f) / 16 * 2;
-    const size_t mask_buffer_size = mask_buffer_stride * bitmap_width;
-    if (src_dib_buffer == nullptr) {
-      return nullptr;
-    }
-    auto mask_buffer = std::make_unique<uint8_t[]>(mask_buffer_size);
-    for (size_t y = 0; y < bitmap_height; ++y) {
-      for (size_t x = 0; x < bitmap_width; ++x) {
-        const uint8_t* src_line_start =
-            src_dib_buffer + src_bmp_info.bmWidthBytes * y;
-        uint8_t* dest_line_start = mask_buffer.get() + mask_buffer_stride * y;
-        ::memcpy(dest_line_start, src_line_start, mask_buffer_stride);
-      }
-    }
-    mask_ddb.reset(
-        ::CreateBitmap(bitmap_width, bitmap_height, 1, 1, mask_buffer.get()));
-    if (!mask_ddb.is_valid()) {
-      return nullptr;
-    }
-  }
-
-  // Step 4. Create a GDI ICON object.
+  // Step 5. Create a GDI ICON object.
   {
     ICONINFO info = {};
     info.fIcon = TRUE;
@@ -232,7 +320,8 @@ HICON CreateMonochromeIconInternal(int bitmap_width, int bitmap_height,
 HICON TextIcon::CreateMonochromeIcon(size_t width, size_t height,
                                      absl::string_view text,
                                      absl::string_view fontname,
-                                     COLORREF text_color) {
+                                     COLORREF text_color, uint8_t opacity,
+                                     Scaling scaling) {
   int safe_width = 0;
   int safe_height = 0;
   int safe_num_pixels = 0;
@@ -243,8 +332,25 @@ HICON TextIcon::CreateMonochromeIcon(size_t width, size_t height,
     return nullptr;
   }
 
-  return CreateMonochromeIconInternal(safe_width, safe_height, text, fontname,
-                                      text_color);
+  return CreateMonochromeIconInternal(safe_width, safe_height, text,
+                                      win32::Utf8ToWide(fontname), text_color,
+                                      opacity, scaling);
+}
+
+// static
+HICON TextIcon::CreateMonochromeIcon(
+    size_t width, size_t height, absl::string_view text,
+    absl::Span<const absl::string_view> fontnames, COLORREF text_color,
+    uint8_t opacity, Scaling scaling) {
+  const std::wstring wide_text = win32::Utf8ToWide(text);
+  for (const absl::string_view fontname : fontnames) {
+    const std::wstring wide_fontname = win32::Utf8ToWide(fontname);
+    if (HasAllGlyphs(wide_fontname, wide_text)) {
+      return CreateMonochromeIcon(width, height, text, fontname, text_color,
+                                  opacity, scaling);
+    }
+  }
+  return nullptr;
 }
 
 }  // namespace win32
