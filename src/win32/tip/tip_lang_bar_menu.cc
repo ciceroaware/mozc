@@ -111,35 +111,6 @@ HICON LoadIconFromResource(HINSTANCE instance, UINT icon_id) {
                                         LR_CREATEDIBSECTION));
 }
 
-class IconBitmaps {
- public:
-  IconBitmaps() = default;
-  IconBitmaps(IconBitmaps&&) = default;
-
-  explicit IconBitmaps(const ICONINFO& info)
-      : color_(info.hbmColor), mask_(info.hbmMask) {}
-
-  wil::unique_hbitmap color_;
-  wil::unique_hbitmap mask_;
-};
-
-// Retrieves the bitmap handle loaded by using an icon ID.
-IconBitmaps LoadIconBitmaps(HINSTANCE instance, UINT icon_id_for_non_theme,
-                            UINT icon_id_for_theme) {
-  wil::unique_hicon icon(LoadIconFromResource(instance, icon_id_for_theme));
-
-  if (!icon.is_valid()) {
-    return {};
-  }
-
-  ICONINFO icon_info = {};
-  if (!::GetIconInfo(icon.get(), &icon_info)) {
-    return {};
-  }
-
-  return IconBitmaps(icon_info);
-}
-
 }  // namespace
 
 HRESULT TipLangBarMenuDataArray::Init(HINSTANCE instance,
@@ -415,17 +386,6 @@ HRESULT TipLangBarButton::SetEnabled(bool enabled) {
   return result;
 }
 
-bool TipLangBarButton::CanContextMenuDisplay32bppIcon() {
-  // We always use a non-theme icon for a context menu icon on the LangBar
-  // unless the current display mode is 32-bpp.  We cannot assume we can
-  // display a 32-bpp icon for a context menu icon on the LangBar unless the
-  // current display mode is 32-bpp.  See http://b/2260057
-  wil::unique_hdc memory_dc(::GetDC(nullptr));
-  return memory_dc.is_valid() &&
-         ::GetDeviceCaps(memory_dc.get(), PLANES) == 1 &&
-         ::GetDeviceCaps(memory_dc.get(), BITSPIXEL) == 32;
-}
-
 TipLangBarMenuData* TipLangBarButton::menu_data(size_t i) {
   return menu_data_.data(i);
 }
@@ -447,111 +407,6 @@ void TipLangBarButton::SetContextMenuEnabled(bool enabled) {
 void TipLangBarButton::SetDescription(const std::wstring& description) {
   ::StringCchCopy(item_info_.szDescription, std::size(item_info_.szDescription),
                   description.c_str());
-}
-
-TipLangBarMenuButton::TipLangBarMenuButton(TipLangBarCallback* langbar_callback,
-                                           const GUID& guid, bool show_in_tray)
-    : TipLangBarButton(langbar_callback, guid, true, show_in_tray),
-      menu_icon_id_for_theme_(0),
-      menu_icon_id_for_non_theme_(0) {}
-
-STDMETHODIMP TipLangBarMenuButton::InitMenu(ITfMenu* menu) {
-  HRESULT result = S_OK;
-
-  // Do nothing if the element is not menu botton.
-  if (!IsMenuButton()) {
-    return result;
-  }
-
-  // Add the menu items of this object to the given ITfMenu object.
-  for (size_t i = 0; i < menu_data_size(); ++i) {
-    const TipLangBarMenuData* data = menu_data(i);
-
-    const UINT icon_id_for_theme = CanContextMenuDisplay32bppIcon()
-                                       ? data->icon_id_for_theme_
-                                       : data->icon_id_for_non_theme_;
-    const IconBitmaps icon_bitmaps =
-        LoadIconBitmaps(TipDllModule::module_handle(),
-                        data->icon_id_for_non_theme_, icon_id_for_theme);
-    result = menu->AddMenuItem(i, data->flags_, icon_bitmaps.color_.get(),
-                               icon_bitmaps.mask_.get(), data->text_,
-                               data->length_, nullptr);
-    if (result != S_OK) {
-      break;
-    }
-  }
-
-  return result;
-}
-
-STDMETHODIMP TipLangBarMenuButton::OnMenuSelect(UINT menu_id) {
-  // Call the TipLangBarCallback::OnMenuSelect() function to dispatch the
-  // given event.
-  TipLangBarMenuData* data = menu_data(menu_id);
-  if (data == nullptr) {
-    return E_INVALIDARG;
-  }
-  if (data->item_id_ == TipLangBarCallback::kCancel) {
-    return S_OK;
-  }
-  const HRESULT result = lang_bar_callback_->OnMenuSelect(
-      static_cast<TipLangBarCallback::ItemId>(data->item_id_));
-  return result;
-}
-
-// Implements the ITfLangBarItem::GetInfo() function.
-// This function is called by Windows to update this button menu.
-STDMETHODIMP TipLangBarMenuButton::GetInfo(TF_LANGBARITEMINFO* item_info) {
-  if (item_info == nullptr) {
-    return E_INVALIDARG;
-  }
-
-  // Just copies the cached TF_LANGBARITEMINFO object.
-  *item_info = *this->item_info();
-
-  wil::unique_hicon icon;
-  if (FAILED(GetIcon(icon.put())) || !icon.is_valid()) {
-    return S_OK;
-  }
-
-  ICONINFO icon_info = {};
-  const BOOL get_icon_succeeded = ::GetIconInfo(icon.get(), &icon_info);
-  wil::unique_hbitmap color(icon_info.hbmColor);
-  wil::unique_hbitmap mask(icon_info.hbmMask);
-  if (!get_icon_succeeded) {
-    return S_OK;
-  }
-
-  if (!color.is_valid() && mask.is_valid()) {
-    item_info->dwStyle |= TF_LBI_STYLE_TEXTCOLORICON;
-    return S_OK;
-  }
-
-  return S_OK;
-}
-
-STDMETHODIMP TipLangBarMenuButton::GetIcon(HICON* icon) {
-  if (icon == nullptr) {
-    return E_INVALIDARG;
-  }
-
-  //  Excerpt: http://msdn.microsoft.com/en-us/library/ms628718.aspx
-  //  The caller must free this icon when it is no longer required by
-  //  calling DestroyIcon.
-  *icon = LoadIconFromResource(TipDllModule::module_handle(),
-                               menu_icon_id_for_theme_);
-  return (*icon ? S_OK : E_FAIL);
-}
-
-// Initializes an ImeButtonMenu instance.
-// This function allocates resources for an ImeButtonMenu instance.
-HRESULT TipLangBarMenuButton::Init(HINSTANCE instance, UINT string_id,
-                                   const TipLangBarMenuItem* menu, int count,
-                                   UINT menu_icon_id_for_non_theme,
-                                   UINT menu_icon_id_for_theme) {
-  menu_icon_id_for_theme_ = menu_icon_id_for_theme;
-  menu_icon_id_for_non_theme_ = menu_icon_id_for_non_theme;
-  return TipLangBarButton::Init(instance, string_id, menu, count);
 }
 
 TipLangBarToggleButton::TipLangBarToggleButton(
@@ -745,66 +600,6 @@ HRESULT TipLangBarToggleButton::SetEnabled(bool enabled) {
   SetDescription(menu_data_for_disabled_.text_);
   TipLangBarButton::OnUpdate(TF_LBI_ICON | TF_LBI_STATUS | TF_LBI_TEXT);
   return S_OK;
-}
-
-// Implements the constructor of the TipSystemLangBarMenu class.
-TipSystemLangBarMenu::TipSystemLangBarMenu(
-    wil::com_ptr_nothrow<TipLangBarCallback> lang_bar_callback,
-    const GUID& guid)
-    : lang_bar_callback_(std::move(lang_bar_callback)) {}
-
-// Implements the ITfLangBarItemButton::InitMenu() function.
-// This function is called by Windows to create the button menu.
-STDMETHODIMP TipSystemLangBarMenu::InitMenu(ITfMenu* menu) {
-  HRESULT result = S_OK;
-
-  // Add the menu items of this object to the given ITfMenu object.
-  for (size_t i = 0; i < menu_data_.size(); ++i) {
-    const TipLangBarMenuData* data = menu_data_.data(i);
-    const UINT icon_id_for_theme =
-        TipLangBarButton::CanContextMenuDisplay32bppIcon()
-            ? data->icon_id_for_theme_
-            : data->icon_id_for_non_theme_;
-    const IconBitmaps& icon_bitmaps =
-        LoadIconBitmaps(TipDllModule::module_handle(),
-                        data->icon_id_for_non_theme_, icon_id_for_theme);
-    result = menu->AddMenuItem(i, data->flags_, icon_bitmaps.color_.get(),
-                               icon_bitmaps.mask_.get(), data->text_,
-                               data->length_, nullptr);
-    if (result != S_OK) {
-      break;
-    }
-  }
-
-  return result;
-}
-
-// Implements the ITfLangBarItemButton::OnMenuSelect() function.
-// This function is called by Windows to notify a user selects an item in
-// this button menu.
-STDMETHODIMP TipSystemLangBarMenu::OnMenuSelect(UINT menu_id) {
-  // Call the TipLangBarCallback::OnMenuSelect() function to dispatch the
-  // given event.
-  TipLangBarMenuData* data = menu_data_.data(menu_id);
-  if (data == nullptr) {
-    return E_INVALIDARG;
-  }
-  if (data->item_id_ == TipLangBarCallback::kCancel) {
-    return S_OK;
-  }
-  (void)lang_bar_callback_->OnMenuSelect(
-      static_cast<TipLangBarCallback::ItemId>(data->item_id_));
-  return S_OK;
-}
-
-// Initializes a TipLangBarButton instance.
-// This function is called by a text service to provide the information
-// required for creating a menu button. A text service MUST call this function
-// before calling the ITfLangBarItemMgr::AddItem() function and adding this
-// button menu to a language bar.
-HRESULT TipSystemLangBarMenu::Init(HINSTANCE instance,
-                                   const TipLangBarMenuItem* menu, int count) {
-  return menu_data_.Init(instance, menu, count);
 }
 
 }  // namespace tsf

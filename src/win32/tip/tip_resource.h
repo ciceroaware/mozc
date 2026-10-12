@@ -31,16 +31,13 @@
 // Microsoft Visual C++ generated include file.
 // Used by TextService_template.rc
 //
-#define IDS_INPUTMODE 104
 #define IDS_WIN8_TRAY_ITEM 105
 #define IDS_DIRECT 106
 #define IDS_HIRAGANA 107
-#define IDS_TOOL 108
 #define IDS_PROPERTY 109
 #define IDS_DICTIONARY 110
 #define IDS_WORD_REGISTER 111
 #define IDS_HELP 112
-#define IDS_CANCEL 114
 #define IDS_ABOUT 116
 #define IDS_FULL_KATAKANA 117
 #define IDS_HALF_ALPHANUMERIC 118
@@ -60,12 +57,6 @@
 #define IDI_DIRECT_NT 103
 #define IDI_HIRAGANA 104
 #define IDI_HIRAGANA_NT 105
-#define IDI_TOOL 106
-#define IDI_TOOL_NT 107
-#define IDI_PROPERTY 108
-#define IDI_PROPERTY_NT 109
-#define IDI_DICTIONARY 110
-#define IDI_DICTIONARY_NT 111
 #define IDI_FULL_KATAKANA 114
 #define IDI_FULL_KATAKANA_NT 115
 #define IDI_HALF_ALPHANUMERIC 116

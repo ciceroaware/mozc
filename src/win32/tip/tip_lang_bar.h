@@ -45,14 +45,9 @@ namespace mozc {
 namespace win32 {
 namespace tsf {
 
-class TipSystemLangBarMenu;
-
 class TipLangBar {
  public:
-  TipLangBar()
-      : tool_button_menu_(nullptr),
-        help_menu_(nullptr),
-        help_menu_cookie_(TF_INVALID_COOKIE) {}
+  TipLangBar() = default;
   TipLangBar(const TipLangBar&) = delete;
   TipLangBar& operator=(const TipLangBar&) = delete;
   ~TipLangBar() = default;
@@ -74,22 +69,9 @@ class TipLangBar {
   //     around refcount on Windows 8 release preview. b/6106437
   wil::com_ptr_nothrow<ITfLangBarItemMgr> lang_bar_item_mgr_;
 
-  // Represents the button menu in the language bar.
-  // NOTE: ImeToggleButtonMenu inherits ITfLangBarItemButton and ITfSource,
-  // which inherit IUnknown. Because of this, using CComPtr<ImeIconButtonMenu>
-  // causes a compile error due to the ambiguous overload resolution.
-  // To avoid the compile error we use CComPtr<ITfLangBarItemButton> instead.
-  wil::com_ptr_nothrow<TipLangBarToggleButton> input_button_menu_;
+  // Represents the input mode button, which is shown in the taskbar as the IME
+  // mode icon on Windows 8 and later.
   wil::com_ptr_nothrow<TipLangBarToggleButton> input_mode_button_for_win8_;
-
-  // Represents the tool button menu in the language bar.
-  wil::com_ptr_nothrow<TipLangBarMenuButton> tool_button_menu_;
-
-  // Represents the help menu in the system language bar.
-  wil::com_ptr_nothrow<TipSystemLangBarMenu> help_menu_;
-
-  // The cookie issued for installing ITfSystemLangBarItemSink of help_menu_.
-  DWORD help_menu_cookie_;
 };
 
 }  // namespace tsf
