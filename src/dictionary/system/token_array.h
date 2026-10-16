@@ -27,8 +27,8 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#ifndef MOZC_STORAGE_LOUDS_BIT_VECTOR_BASED_ARRAY_H_
-#define MOZC_STORAGE_LOUDS_BIT_VECTOR_BASED_ARRAY_H_
+#ifndef MOZC_DICTIONARY_SYSTEM_TOKEN_ARRAY_H_
+#define MOZC_DICTIONARY_SYSTEM_TOKEN_ARRAY_H_
 
 #include <cstddef>
 #include <cstdint>
@@ -36,16 +36,15 @@
 #include "storage/louds/simple_succinct_bit_vector_index.h"
 
 namespace mozc {
-namespace storage {
-namespace louds {
+namespace dictionary {
 
 // Implementation of an array of variable length of data by using bit vector
-// supporting Rank/Select operations.
-class BitVectorBasedArray {
+// supporting Select operations.
+class TokenArray {
  public:
-  BitVectorBasedArray() = default;
-  BitVectorBasedArray(const BitVectorBasedArray &) = delete;
-  BitVectorBasedArray &operator=(const BitVectorBasedArray &) = delete;
+  TokenArray() = default;
+  TokenArray(const TokenArray &) = delete;
+  TokenArray &operator=(const TokenArray &) = delete;
 
   void Open(const uint8_t *image);
   void Close();
@@ -55,14 +54,13 @@ class BitVectorBasedArray {
   const char *Get(size_t index, size_t *length) const;
 
  private:
-  SimpleSuccinctBitVectorIndex index_;
+  storage::louds::SimpleSuccinctBitVectorIndex index_;
   size_t base_length_;
   size_t step_length_;
   const char *data_;
 };
 
-}  // namespace louds
-}  // namespace storage
+}  // namespace dictionary
 }  // namespace mozc
 
-#endif  // MOZC_STORAGE_LOUDS_BIT_VECTOR_BASED_ARRAY_H_
+#endif  // MOZC_DICTIONARY_SYSTEM_TOKEN_ARRAY_H_

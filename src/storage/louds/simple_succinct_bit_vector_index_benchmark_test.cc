@@ -76,7 +76,7 @@ constexpr DataShape kUniform = {0.5, 0.0};
 constexpr DataShape kLouds = {0.5, 0.25};
 // Emulate terminal bit vector of a trie, queried by Select1.
 constexpr DataShape kTerminal = {0.3, 0.25};
-// Emulate index of BitVectorBasedArray (token array), queried by Select0.
+// Emulate index of the system dictionary TokenArray, queried by Select0.
 constexpr DataShape kTokenIndex = {0.8, 0.15};
 
 std::vector<uint8_t> GenerateData(size_t size, DataShape shape) {

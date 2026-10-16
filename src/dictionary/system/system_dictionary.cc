@@ -79,15 +79,14 @@
 #include "dictionary/file/dictionary_file.h"
 #include "dictionary/system/codec.h"
 #include "dictionary/system/key_expansion_table.h"
+#include "dictionary/system/token_array.h"
 #include "dictionary/system/token_decode_iterator.h"
 #include "dictionary/system/words_info.h"
-#include "storage/louds/bit_vector_based_array.h"
 #include "storage/louds/louds_trie.h"
 
 namespace mozc {
 namespace dictionary {
 
-using ::mozc::storage::louds::BitVectorBasedArray;
 using ::mozc::storage::louds::LoudsTrie;
 
 namespace {
@@ -148,7 +147,7 @@ void BuildHiraganaExpansionTable(const SystemDictionaryCodec& codec,
   }
 }
 
-inline const uint8_t* GetTokenArrayPtr(const BitVectorBasedArray& token_array,
+inline const uint8_t* GetTokenArrayPtr(const TokenArray& token_array,
                                        int key_id) {
   size_t length = 0;
   return reinterpret_cast<const uint8_t*>(token_array.Get(key_id, &length));
@@ -183,7 +182,7 @@ class TokenScanIterator {
   TokenScanIterator(const TokenScanIterator&) = delete;
   TokenScanIterator& operator=(const TokenScanIterator&) = delete;
   TokenScanIterator(const SystemDictionaryCodec& codec,
-                    const BitVectorBasedArray& token_array)
+                    const TokenArray& token_array)
       : codec_(codec),
         termination_flag_(codec.GetTokensTerminationFlag()),
         state_(HAS_NEXT),
@@ -277,7 +276,7 @@ class SystemDictionary::ReverseLookupIndex {
   ReverseLookupIndex(const ReverseLookupIndex&) = delete;
   ReverseLookupIndex& operator=(const ReverseLookupIndex&) = delete;
   ReverseLookupIndex(const SystemDictionaryCodec& codec,
-                     const BitVectorBasedArray& token_array) {
+                     const TokenArray& token_array) {
     // Gets id size.
     int value_id_max = -1;
     for (TokenScanIterator iter(codec, token_array); !iter.Done();
@@ -727,7 +726,7 @@ namespace {
 template <typename Func>
 void RunCallbackOnEachPrefix(
     const LoudsTrie& key_trie, const LoudsTrie& value_trie,
-    const BitVectorBasedArray& token_array, const SystemDictionaryCodec& codec,
+    const TokenArray& token_array, const SystemDictionaryCodec& codec,
     absl::Span<const uint32_t> frequent_pos, absl::string_view key,
     absl::string_view encoded_key, DictionaryInterface::Callback* callback,
     Func token_filter) {

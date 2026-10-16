@@ -36,13 +36,12 @@
 
 #include "absl/base/no_destructor.h"
 #include "absl/strings/string_view.h"
-#include "storage/louds/bit_vector_based_array.h"
-#include "storage/louds/bit_vector_based_array_builder.h"
+#include "dictionary/system/token_array.h"
+#include "dictionary/system/token_array_builder.h"
 #include "testing/benchmark.h"
 
 namespace mozc {
-namespace storage {
-namespace louds {
+namespace dictionary {
 namespace {
 
 // A simple Linear Congruential Generator (LCG) for deterministic pseudo random
@@ -69,7 +68,7 @@ class Lcg {
 };
 
 // A synthetic array that follows the token array of the OSS system dictionary,
-// the main user of BitVectorBasedArray. The token array stores the encoded
+// the main user of TokenArray. The token array stores the encoded
 // tokens of each key as one element with base_length 4 and step_length 1, so an
 // element of n steps is 4 + n bytes long and is represented by n 1-bits in the
 // index. The OSS token array as of Mozc version 3.34.6239 has these properties,
@@ -194,7 +193,7 @@ class SyntheticTokenArray {
   };
 
   static std::vector<uint8_t> Build() {
-    BitVectorBasedArrayBuilder builder;
+    TokenArrayBuilder builder;
     builder.SetSize(kBaseLength, kStepLength);
     StepGenerator generator;
     for (size_t i = 0; i < kNumElements; ++i) {
@@ -213,7 +212,7 @@ constexpr size_t kNumQueries = 1024;
 void BM_Open(benchmark::State& state) {
   const std::vector<uint8_t>& image = SyntheticTokenArray::GetOrCreate();
   for (auto _ : state) {
-    BitVectorBasedArray array;
+    TokenArray array;
     array.Open(image.data());
     benchmark::DoNotOptimize(array);
   }
@@ -225,7 +224,7 @@ void BM_Open(benchmark::State& state) {
 // unpredictable and the index is mostly accessed out of the L1 cache.
 void BM_Get_Random(benchmark::State& state) {
   const std::vector<uint8_t>& image = SyntheticTokenArray::GetOrCreate();
-  BitVectorBasedArray array;
+  TokenArray array;
   array.Open(image.data());
   constexpr uint32_t kNumElements = SyntheticTokenArray::kNumElements;
   Lcg lcg(42);
@@ -248,7 +247,7 @@ void BM_Get_Random(benchmark::State& state) {
 // measures the instruction cost of a lookup rather than its memory cost.
 void BM_Get_Sequential(benchmark::State& state) {
   const std::vector<uint8_t>& image = SyntheticTokenArray::GetOrCreate();
-  BitVectorBasedArray array;
+  TokenArray array;
   array.Open(image.data());
   constexpr size_t kNumElements = SyntheticTokenArray::kNumElements;
   size_t index = 0;
@@ -273,6 +272,5 @@ BENCHMARK(BM_Get_Random);
 BENCHMARK(BM_Get_Sequential);
 
 }  // namespace
-}  // namespace louds
-}  // namespace storage
+}  // namespace dictionary
 }  // namespace mozc

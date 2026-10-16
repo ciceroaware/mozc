@@ -27,24 +27,24 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#include "storage/louds/bit_vector_based_array.h"
+#include "dictionary/system/token_array.h"
 
 #include <cstddef>
 #include <cstdint>
 #include <iterator>
 #include <string>
 
-#include "storage/louds/bit_vector_based_array_builder.h"
+#include "dictionary/system/token_array_builder.h"
 #include "testing/gunit.h"
 
 namespace {
 
-using ::mozc::storage::louds::BitVectorBasedArray;
-using ::mozc::storage::louds::BitVectorBasedArrayBuilder;
+using ::mozc::dictionary::TokenArray;
+using ::mozc::dictionary::TokenArrayBuilder;
 
-class BitVectorBasedArrayTest : public ::testing::Test {};
+class TokenArrayTest : public ::testing::Test {};
 
-TEST_F(BitVectorBasedArrayTest, Get) {
+TEST_F(TokenArrayTest, Get) {
   struct {
     const char* element;
     const size_t length;
@@ -64,14 +64,14 @@ TEST_F(BitVectorBasedArrayTest, Get) {
       {"another-test-data", 17, "another-test-data\x00", 18},
   };
 
-  BitVectorBasedArrayBuilder builder;
+  TokenArrayBuilder builder;
   for (size_t i = 0; i < std::size(kTestData); ++i) {
     builder.Add(std::string(kTestData[i].element, kTestData[i].length));
   }
   builder.SetSize(4, 2);
   builder.Build();
 
-  BitVectorBasedArray array;
+  TokenArray array;
   array.Open(reinterpret_cast<const uint8_t*>(builder.image().data()));
   for (size_t i = 0; i < std::size(kTestData); ++i) {
     size_t length;

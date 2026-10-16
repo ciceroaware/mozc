@@ -34,7 +34,7 @@
 #include "absl/strings/str_cat.h"
 #include "testing/gunit.h"
 
-namespace mozc::storage::louds::internal {
+namespace mozc::storage::louds {
 namespace {
 
 class BitStreamTest : public ::testing::Test {};
@@ -79,18 +79,18 @@ TEST_F(BitStreamTest, FillPadding32) {
 TEST_F(BitStreamTest, PushInt32) {
   std::string image;
   std::string expected = std::string(4, '\x00');
-  PushInt32(0, image);
+  BitStream::PushInt32(0, image);
   EXPECT_EQ(image, expected);
 
   absl::StrAppend(&expected, std::string(4, '\xff'));
 
-  PushInt32(0xffffffff, image);
+  BitStream::PushInt32(0xffffffff, image);
   EXPECT_EQ(image, expected);
 
   absl::StrAppend(&expected, "\x78\x56\x34\x12");
-  PushInt32(0x12345678, image);
+  BitStream::PushInt32(0x12345678, image);
   EXPECT_EQ(image, expected);
 }
 
 }  // namespace
-}  // namespace mozc::storage::louds::internal
+}  // namespace mozc::storage::louds

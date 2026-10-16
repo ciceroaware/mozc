@@ -27,7 +27,7 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#include "storage/louds/bit_vector_based_array_builder.h"
+#include "dictionary/system/token_array_builder.h"
 
 #include <cstddef>
 #include <string>
@@ -39,24 +39,22 @@
 #include "storage/louds/bit_stream.h"
 
 namespace mozc {
-namespace storage {
-namespace louds {
+namespace dictionary {
 
-using ::mozc::storage::louds::internal::PushInt32;
+using ::mozc::storage::louds::BitStream;
 
-void BitVectorBasedArrayBuilder::Add(std::string element) {
+void TokenArrayBuilder::Add(std::string element) {
   CHECK(!built_);
   elements_.emplace_back(std::move(element));
 }
 
-void BitVectorBasedArrayBuilder::SetSize(size_t base_length,
-                                         size_t step_length) {
+void TokenArrayBuilder::SetSize(size_t base_length, size_t step_length) {
   CHECK(!built_);
   base_length_ = base_length;
   step_length_ = step_length;
 }
 
-void BitVectorBasedArrayBuilder::Build() {
+void TokenArrayBuilder::Build() {
   CHECK(!built_);
 
   BitStream bit_stream;
@@ -92,10 +90,10 @@ void BitVectorBasedArrayBuilder::Build() {
   bit_stream.FillPadding32();
 
   // Output the image.
-  PushInt32(bit_stream.ByteSize(), image_);
-  PushInt32(base_length_, image_);
-  PushInt32(step_length_, image_);
-  PushInt32(0, image_);
+  BitStream::PushInt32(bit_stream.ByteSize(), image_);
+  BitStream::PushInt32(base_length_, image_);
+  BitStream::PushInt32(step_length_, image_);
+  BitStream::PushInt32(0, image_);
 
   image_.append(bit_stream.image());
   image_.append(data);
@@ -103,11 +101,10 @@ void BitVectorBasedArrayBuilder::Build() {
   built_ = true;
 }
 
-absl::string_view BitVectorBasedArrayBuilder::image() const {
+absl::string_view TokenArrayBuilder::image() const {
   CHECK(built_);
   return image_;
 }
 
-}  // namespace louds
-}  // namespace storage
+}  // namespace dictionary
 }  // namespace mozc

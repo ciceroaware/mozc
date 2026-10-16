@@ -46,7 +46,7 @@
 #include "dictionary/file/dictionary_file.h"
 #include "dictionary/system/codec.h"
 #include "dictionary/system/key_expansion_table.h"
-#include "storage/louds/bit_vector_based_array.h"
+#include "dictionary/system/token_array.h"
 #include "storage/louds/louds_trie.h"
 
 namespace mozc {
@@ -168,7 +168,7 @@ class SystemDictionary : public DictionaryInterface {
 
   storage::louds::LoudsTrie key_trie_;
   storage::louds::LoudsTrie value_trie_;
-  storage::louds::BitVectorBasedArray token_array_;
+  TokenArray token_array_;
   absl::Span<const uint32_t> frequent_pos_;
   std::unique_ptr<const SystemDictionaryCodec> codec_;
   std::unique_ptr<const DictionaryFileCodec> file_codec_;

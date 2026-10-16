@@ -56,16 +56,13 @@ class BitStream {
   // Fills the padding (0-bit) until the size is aligned to 32-bit boundary.
   void FillPadding32();
 
+  // Appends the value to the image as a 32-bit little-endian integer.
+  static void PushInt32(size_t value, std::string& image);
+
  private:
   std::string image_;
   size_t num_bits_ = 0;
 };
-
-namespace internal {
-
-void PushInt32(size_t value, std::string& image);
-
-}  // namespace internal
 
 }  // namespace louds
 }  // namespace storage
