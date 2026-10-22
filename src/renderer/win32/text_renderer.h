@@ -93,12 +93,21 @@ class TextRenderer {
   virtual Size MeasureStringMultiLine(FONT_TYPE font_type,
                                       std::wstring_view str,
                                       int width) const = 0;
-  // Renders the given |text|.
+  // Renders the given |text|. Uses the per-FONT_TYPE default text color.
   virtual void RenderText(HDC dc, std::wstring_view text, const Rect& rect,
                           FONT_TYPE font_type) const = 0;
   virtual void RenderTextList(HDC dc,
                               absl::Span<const TextRenderingInfo> display_list,
                               FONT_TYPE font_type) const = 0;
+
+  // Renders the given |text| with an explicit text |color|, overriding the
+  // per-FONT_TYPE default color. Font and alignment are still taken from
+  // |font_type|.
+  virtual void RenderText(HDC dc, std::wstring_view text, const Rect& rect,
+                          FONT_TYPE font_type, COLORREF color) const = 0;
+  virtual void RenderTextList(HDC dc,
+                              absl::Span<const TextRenderingInfo> display_list,
+                              FONT_TYPE font_type, COLORREF color) const = 0;
 };
 
 }  // namespace win32
