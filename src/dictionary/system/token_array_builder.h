@@ -27,8 +27,8 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#ifndef MOZC_STORAGE_LOUDS_BIT_VECTOR_BASED_ARRAY_BUILDER_H_
-#define MOZC_STORAGE_LOUDS_BIT_VECTOR_BASED_ARRAY_BUILDER_H_
+#ifndef MOZC_DICTIONARY_SYSTEM_TOKEN_ARRAY_BUILDER_H_
+#define MOZC_DICTIONARY_SYSTEM_TOKEN_ARRAY_BUILDER_H_
 
 #include <cstddef>
 #include <string>
@@ -37,17 +37,14 @@
 #include "absl/strings/string_view.h"
 
 namespace mozc {
-namespace storage {
-namespace louds {
+namespace dictionary {
 
-class BitVectorBasedArrayBuilder {
+class TokenArrayBuilder {
  public:
   // Initial values of base_length_ and step_length_ is (4, 1) bytes.
-  BitVectorBasedArrayBuilder()
-      : built_(false), base_length_(4), step_length_(1) {}
-  BitVectorBasedArrayBuilder(const BitVectorBasedArrayBuilder&) = delete;
-  BitVectorBasedArrayBuilder& operator=(const BitVectorBasedArrayBuilder&) =
-      delete;
+  TokenArrayBuilder() : built_(false), base_length_(4), step_length_(1) {}
+  TokenArrayBuilder(const TokenArrayBuilder&) = delete;
+  TokenArrayBuilder& operator=(const TokenArrayBuilder&) = delete;
 
   // Adds the element to the builder.
   // The length of the element would be ceiling by padding '\x00' bytes to the
@@ -81,8 +78,7 @@ class BitVectorBasedArrayBuilder {
   std::string image_;
 };
 
-}  // namespace louds
-}  // namespace storage
+}  // namespace dictionary
 }  // namespace mozc
 
-#endif  // MOZC_STORAGE_LOUDS_BIT_VECTOR_BASED_ARRAY_BUILDER_H_
+#endif  // MOZC_DICTIONARY_SYSTEM_TOKEN_ARRAY_BUILDER_H_

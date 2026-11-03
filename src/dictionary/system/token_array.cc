@@ -27,7 +27,7 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#include "storage/louds/bit_vector_based_array.h"
+#include "dictionary/system/token_array.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -37,8 +37,7 @@
 #include "storage/louds/simple_succinct_bit_vector_index.h"
 
 namespace mozc {
-namespace storage {
-namespace louds {
+namespace dictionary {
 namespace {
 
 // Select1 is not used, so cache is unnecessary.
@@ -47,7 +46,7 @@ constexpr size_t kLb1CacheSize = 0;
 
 }  // namespace
 
-void BitVectorBasedArray::Open(const uint8_t *image) {
+void TokenArray::Open(const uint8_t *image) {
   const int index_length = LoadUnalignedAdvance<uint32_t>(image);
   const int base_length = LoadUnalignedAdvance<uint32_t>(image);
   const int step_length = LoadUnalignedAdvance<uint32_t>(image);
@@ -60,14 +59,14 @@ void BitVectorBasedArray::Open(const uint8_t *image) {
   data_ = reinterpret_cast<const char *>(image + index_length);
 }
 
-void BitVectorBasedArray::Close() {
+void TokenArray::Close() {
   index_.Reset();
   base_length_ = 0;
   step_length_ = 0;
   data_ = nullptr;
 }
 
-const char *BitVectorBasedArray::Get(size_t index, size_t *length) const {
+const char *TokenArray::Get(size_t index, size_t *length) const {
   DCHECK(length);
   const size_t bit_index = index_.Select0(index + 1);
   // Exactly index 0-bits precede bit_index, so bit_index - index 1-bits do.
@@ -83,6 +82,5 @@ const char *BitVectorBasedArray::Get(size_t index, size_t *length) const {
   return data_ + data_index;
 }
 
-}  // namespace louds
-}  // namespace storage
+}  // namespace dictionary
 }  // namespace mozc

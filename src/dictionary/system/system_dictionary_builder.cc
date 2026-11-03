@@ -61,8 +61,8 @@
 #include "dictionary/file/codec.h"
 #include "dictionary/file/section.h"
 #include "dictionary/system/codec.h"
+#include "dictionary/system/token_array_builder.h"
 #include "dictionary/system/words_info.h"
-#include "storage/louds/bit_vector_based_array_builder.h"
 #include "storage/louds/louds_trie_builder.h"
 
 ABSL_FLAG(bool, preserve_intermediate_dictionary, false,

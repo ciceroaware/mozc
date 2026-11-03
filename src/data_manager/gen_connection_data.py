@@ -150,8 +150,7 @@ def BuildBinaryData(matrix, mode_value_list, use_1byte_cost):
   # find the mode value of the row, and set the cells containins the value
   # empty, thus we get a sparse array.
   # We can compress sparse array by using succinct bit vector.
-  # (Please see also storage/louds/simple_succinct_bit_vector_index and
-  # storage/louds/bit_vector_based_array.)
+  # (Please see also Connector::Row in converter/connector.h.)
   # In addition, we compress the bit vector, too. Fortunately the distribution
   # of bits is biased, so we group consecutive 8-bits and create another
   # bit vector, named chunk-bits;

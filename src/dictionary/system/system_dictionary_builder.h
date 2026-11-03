@@ -43,8 +43,8 @@
 #include "dictionary/dictionary_token.h"
 #include "dictionary/file/codec.h"
 #include "dictionary/system/codec.h"
+#include "dictionary/system/token_array_builder.h"
 #include "dictionary/system/words_info.h"
-#include "storage/louds/bit_vector_based_array_builder.h"
 #include "storage/louds/louds_trie_builder.h"
 
 namespace mozc {
@@ -107,7 +107,7 @@ class SystemDictionaryBuilder final {
 
   storage::louds::LoudsTrieBuilder value_trie_builder_;
   storage::louds::LoudsTrieBuilder key_trie_builder_;
-  storage::louds::BitVectorBasedArrayBuilder token_array_builder_;
+  TokenArrayBuilder token_array_builder_;
 
   // mapping from {left_id, right_id} to POS index (0--255)
   std::map<uint32_t, int> frequent_pos_;

@@ -45,8 +45,6 @@ namespace storage {
 namespace louds {
 namespace {
 
-using ::mozc::storage::louds::internal::PushInt32;
-
 // A pair of word and its original index in the (sorted) word_list_.
 class Entry {
  public:
@@ -180,11 +178,11 @@ void LoudsTrieBuilder::Build() {
   terminal_stream.FillPadding32();
 
   // Output
-  PushInt32(trie_stream.ByteSize(), image_);
-  PushInt32(terminal_stream.ByteSize(), image_);
+  BitStream::PushInt32(trie_stream.ByteSize(), image_);
+  BitStream::PushInt32(terminal_stream.ByteSize(), image_);
   // The num bits of each character annotated to each edge.
-  PushInt32(8, image_);
-  PushInt32(edge_character.size(), image_);
+  BitStream::PushInt32(8, image_);
+  BitStream::PushInt32(edge_character.size(), image_);
 
   image_.append(trie_stream.image());
   image_.append(terminal_stream.image());
