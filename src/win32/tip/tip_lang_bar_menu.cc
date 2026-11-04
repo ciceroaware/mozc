@@ -32,6 +32,7 @@
 #include <atlbase.h>
 #include <atltypes.h>
 #include <commctrl.h>
+#include <ctffunc.h>
 #include <ctfutb.h>
 #include <ole2.h>
 #include <olectl.h>
@@ -46,8 +47,6 @@
 #include <string>
 #include <utility>
 
-#include "absl/base/casts.h"
-#include "absl/base/macros.h"
 #include "base/win32/com.h"
 #include "base/win32/com_implements.h"
 #include "win32/base/tsf_profile.h"
@@ -66,7 +65,7 @@ bool IsIIDOf<ITfLangBarItemButton>(REFIID riid) {
 namespace tsf {
 namespace {
 
-// Represents the cookie for the sink to a TipLangBarButton object.
+// Represents the cookie for the sink to a TipLangBarToggleButton object.
 constexpr int kTipLangBarMenuCookie =
     (('M' << 24) | ('o' << 16) | ('z' << 8) | ('c' << 0));
 
@@ -114,38 +113,33 @@ TipLangBarMenuData* TipLangBarMenuDataArray::data(size_t i) {
   return &data_[i];
 }
 
-// Implements the constructor of the TipLangBarButton class.
-TipLangBarButton::TipLangBarButton(
-    wil::com_ptr_nothrow<TipLangBarCallback> lang_bar_callback,
-    const GUID& guid, bool is_menu, bool show_in_tray)
+// Implements the constructor of the TipLangBarToggleButton class.
+TipLangBarToggleButton::TipLangBarToggleButton(
+    wil::com_ptr_nothrow<TipLangBarCallback> lang_bar_callback)
     : lang_bar_callback_(std::move(lang_bar_callback)),
-      status_(0),
-      context_menu_enabled_(true) {
+      menu_selected_(0),
+      disabled_(false) {
   // Initialize its TF_LANGBARITEMINFO object, which contains the properties of
   // this item and is copied to the TSF manager in GetInfo() function.
   item_info_.clsidService = TsfProfile::GetTextServiceGuid();
-  item_info_.guidItem = guid;
+  item_info_.guidItem = GUID_LBI_INPUTMODE;
   // The visibility of a langbar-item in the minimized langbar is actually
   // controlled by TF_LBI_STYLE_SHOWNINTRAY flag despite the fact that the
   // document says "This flag is not currently supported".
   // http://msdn.microsoft.com/en-us/library/ms629078.aspx
   // http://b/2275633
-  item_info_.dwStyle = 0;
-  if (is_menu) {
-    item_info_.dwStyle |= TF_LBI_STYLE_BTN_MENU;
-  } else {
-    item_info_.dwStyle |= TF_LBI_STYLE_BTN_BUTTON;
-  }
-  if (show_in_tray) {
-    item_info_.dwStyle |= TF_LBI_STYLE_SHOWNINTRAY;
-  }
+  item_info_.dwStyle = TF_LBI_STYLE_BTN_BUTTON | TF_LBI_STYLE_SHOWNINTRAY;
   item_info_.ulSort = 0;
   item_info_.szDescription[0] = L'\0';
 }
 
 // Implements the ITfLangBarItem::GetInfo() function.
 // This function is called by Windows to update this button menu.
-STDMETHODIMP TipLangBarButton::GetInfo(TF_LANGBARITEMINFO* item_info) {
+STDMETHODIMP TipLangBarToggleButton::GetInfo(TF_LANGBARITEMINFO* item_info) {
+  if (item_info == nullptr) {
+    return E_INVALIDARG;
+  }
+
   // Just copies the cached TF_LANGBARITEMINFO object.
   *item_info = item_info_;
   return S_OK;
@@ -154,15 +148,17 @@ STDMETHODIMP TipLangBarButton::GetInfo(TF_LANGBARITEMINFO* item_info) {
 // Implements the ITfLangBarItem::GetStatus() function.
 // This function is called by Windows to retrieve the current status of this
 // button menu.
-STDMETHODIMP TipLangBarButton::GetStatus(DWORD* status) {
-  *status = status_;
+STDMETHODIMP TipLangBarToggleButton::GetStatus(DWORD* status) {
+  // TF_LBI_STATUS_DISABLED is never set. The disabled state is represented by
+  // a dedicated icon and description instead. See SetEnabled().
+  *status = 0;
   return S_OK;
 }
 
 // Implements the ITfLangBarItem::Show() function.
 // This function is called by Windows to notify the display status of this
 // button menu has been updated.
-STDMETHODIMP TipLangBarButton::Show(BOOL show) {
+STDMETHODIMP TipLangBarToggleButton::Show(BOOL show) {
   // Just return because this button is always shown, i.e. we do not have to
   // manage the display state of this button menu.
   return E_NOTIMPL;
@@ -171,7 +167,7 @@ STDMETHODIMP TipLangBarButton::Show(BOOL show) {
 // Implements the ITfLangBarItem::GetTooltipString() function.
 // This function is called when Windows to retrieve the tool-tip string of
 // this button menu.
-STDMETHODIMP TipLangBarButton::GetTooltipString(BSTR* tooltip) {
+STDMETHODIMP TipLangBarToggleButton::GetTooltipString(BSTR* tooltip) {
   // Created a COM string from the description and copy it.
   *tooltip = ::SysAllocString(&item_info_.szDescription[0]);
   return (*tooltip ? S_OK : E_OUTOFMEMORY);
@@ -179,18 +175,14 @@ STDMETHODIMP TipLangBarButton::GetTooltipString(BSTR* tooltip) {
 
 // Implements the ITfLangBarItemButton::OnClick() function.
 // This function is not used for a button menu.
-STDMETHODIMP TipLangBarButton::OnClick(TfLBIClick click, POINT point,
-                                       const RECT* rect) {
-  if (IsMenuButton()) {
-    // ITfLangBarItem object is a button menu.
-    return S_OK;
-  }
+STDMETHODIMP TipLangBarToggleButton::OnClick(TfLBIClick click, POINT point,
+                                             const RECT* rect) {
   if (click == TF_LBI_CLK_LEFT) {
     return lang_bar_callback_->OnItemClick(item_info_.szDescription);
   }
 
   // If context menu is disabled, do nothing.
-  if (!context_menu_enabled_) {
+  if (disabled_) {
     return S_OK;
   }
 
@@ -270,14 +262,15 @@ STDMETHODIMP TipLangBarButton::OnClick(TfLBIClick click, POINT point,
 // Implements the ITfLangBarItemButton::GetText() function.
 // This function is called by Windows to retrieve the text label of this
 // button menu.
-STDMETHODIMP TipLangBarButton::GetText(BSTR* text) {
+STDMETHODIMP TipLangBarToggleButton::GetText(BSTR* text) {
   *text = ::SysAllocString(&item_info_.szDescription[0]);
   return (*text ? S_OK : E_OUTOFMEMORY);
 }
 
 // Implements the ITfSource::AdviseSink() function.
-STDMETHODIMP TipLangBarButton::AdviseSink(REFIID interface_id,
-                                          IUnknown* unknown, DWORD* cookie) {
+STDMETHODIMP TipLangBarToggleButton::AdviseSink(REFIID interface_id,
+                                                IUnknown* unknown,
+                                                DWORD* cookie) {
   // Return if the caller tries to start advising any events except the
   // ITfLangBarItemSink events.
   if (!IsEqualIID(IID_ITfLangBarItemSink, interface_id))
@@ -298,7 +291,7 @@ STDMETHODIMP TipLangBarButton::AdviseSink(REFIID interface_id,
   return S_OK;
 }
 
-STDMETHODIMP TipLangBarButton::UnadviseSink(DWORD cookie) {
+STDMETHODIMP TipLangBarToggleButton::UnadviseSink(DWORD cookie) {
   if (cookie != kTipLangBarMenuCookie) {
     return E_INVALIDARG;
   }
@@ -312,13 +305,72 @@ STDMETHODIMP TipLangBarButton::UnadviseSink(DWORD cookie) {
   return S_OK;
 }
 
-// Initializes a TipLangBarButton instance.
+HRESULT TipLangBarToggleButton::OnUpdate(DWORD update_flag) {
+  // For some reason, this method might be called when the event sink is not
+  // available. See b/2977835 for details.
+  if (item_sink_ == nullptr) {
+    return E_FAIL;
+  }
+  return item_sink_->OnUpdate(update_flag);
+}
+
+TipLangBarMenuData* TipLangBarToggleButton::menu_data(size_t i) {
+  return menu_data_.data(i);
+}
+
+size_t TipLangBarToggleButton::menu_data_size() const {
+  return menu_data_.size();
+}
+
+void TipLangBarToggleButton::SetDescription(const std::wstring& description) {
+  ::StringCchCopy(item_info_.szDescription, std::size(item_info_.szDescription),
+                  description.c_str());
+}
+
+// Implements the ITfLangBarItemButton::InitMenu() function.
+// This function is not used for a button (as opposed to a button menu).
+STDMETHODIMP TipLangBarToggleButton::InitMenu(ITfMenu* menu) { return S_OK; }
+
+// Implements the ITfLangBarItemButton::OnMenuSelect() function.
+// This function is not used for a button (as opposed to a button menu). The
+// context menu is handled in OnClick() instead.
+STDMETHODIMP TipLangBarToggleButton::OnMenuSelect(UINT menu_id) {
+  return E_NOTIMPL;
+}
+
+STDMETHODIMP TipLangBarToggleButton::GetIcon(HICON* icon) {
+  if (icon == nullptr) {
+    return E_INVALIDARG;
+  }
+
+  // MSIME 2012 shows special icon when the LangBar item is disabled. Here we
+  // adopt this behavior for the consistency.
+  const TipLangBarMenuData& data =
+      disabled_ ? menu_data_for_disabled_ : *menu_data(menu_selected_);
+
+  //  Excerpt: http://msdn.microsoft.com/en-us/library/ms628718.aspx
+  //  The caller must free this icon when it is no longer required by
+  //  calling DestroyIcon.
+  *icon = LoadIconFromResource(TipDllModule::module_handle(), data.icon_id_);
+  return (*icon ? S_OK : E_FAIL);
+}
+
+// Initializes a TipLangBarToggleButton instance.
 // This function is called by a text service to provide the information
 // required for creating a menu button. A text service MUST call this function
 // before calling the ITfLangBarItemMgr::AddItem() function and adding this
 // button menu to a language bar.
-HRESULT TipLangBarButton::Init(HINSTANCE instance, int string_id,
-                               const TipLangBarMenuItem* menu, int count) {
+HRESULT TipLangBarToggleButton::Init(
+    HINSTANCE instance, int string_id, const TipLangBarMenuItem* menu,
+    int count, const TipLangBarMenuItem& menu_for_disabled) {
+  TipLangBarMenuDataArray array;
+  if (SUCCEEDED(array.Init(instance, &menu_for_disabled, 1))) {
+    menu_data_for_disabled_ = *array.data(0);
+  }
+  wchar_t buffer[TF_LBI_DESC_MAXLEN];
+  ::LoadString(instance, string_id, buffer, std::size(buffer));
+  description_for_enabled_ = buffer;
+
   // Retrieve the text label from the resource.
   // This string is also used as a tool-tip text.
   ::LoadString(instance, string_id, &item_info_.szDescription[0],
@@ -330,168 +382,10 @@ HRESULT TipLangBarButton::Init(HINSTANCE instance, int string_id,
   return S_OK;
 }
 
-HRESULT TipLangBarButton::OnUpdate(DWORD update_flag) {
-  // For some reason, this method might be called when the event sink is not
-  // available. See b/2977835 for details.
-  if (item_sink_ == nullptr) {
-    return E_FAIL;
-  }
-  return item_sink_->OnUpdate(update_flag);
-}
-
-HRESULT TipLangBarButton::SetEnabled(bool enabled) {
-  HRESULT result = S_OK;
-
-  if (enabled) {
-    status_ &= ~TF_LBI_STATUS_DISABLED;
-  } else {
-    status_ |= TF_LBI_STATUS_DISABLED;
-  }
-  result = TipLangBarButton::OnUpdate(TF_LBI_STATUS);
-
-  return result;
-}
-
-TipLangBarMenuData* TipLangBarButton::menu_data(size_t i) {
-  return menu_data_.data(i);
-}
-
-size_t TipLangBarButton::menu_data_size() const { return menu_data_.size(); }
-
-const TF_LANGBARITEMINFO* TipLangBarButton::item_info() const {
-  return &item_info_;
-}
-
-bool TipLangBarButton::IsMenuButton() const {
-  return (item_info_.dwStyle & TF_LBI_STYLE_BTN_MENU) == TF_LBI_STYLE_BTN_MENU;
-}
-
-void TipLangBarButton::SetContextMenuEnabled(bool enabled) {
-  context_menu_enabled_ = enabled;
-}
-
-void TipLangBarButton::SetDescription(const std::wstring& description) {
-  ::StringCchCopy(item_info_.szDescription, std::size(item_info_.szDescription),
-                  description.c_str());
-}
-
-TipLangBarToggleButton::TipLangBarToggleButton(
-    TipLangBarCallback* langbar_callback, const GUID& guid, bool is_menu,
-    bool show_in_tray)
-    : TipLangBarButton(langbar_callback, guid, is_menu, show_in_tray),
-      menu_selected_(0),
-      disabled_(false) {}
-
-// Implements the IUnknown::QueryInterface() function.
-// This function is used by Windows to retrieve the interfaces implemented by
-// this class.
-STDMETHODIMP TipLangBarToggleButton::QueryInterface(REFIID interface_id,
-                                                    void** object) {
-  if (!object) {
-    return E_POINTER;
-  }
-
-  // Respond to IMozcLangBarToggleItem in addition to base.
-  if (IsIIDOf<IMozcLangBarToggleItem>(interface_id)) {
-    *object = absl::implicit_cast<IMozcLangBarToggleItem*>(this);
-    AddRef();
-    return S_OK;
-  }
-  return TipLangBarButton::QueryInterface(interface_id, object);
-}
-
-// Implements the ITfLangBarItem::GetInfo() function.
-// This function is called by Windows to update this button menu.
-STDMETHODIMP TipLangBarToggleButton::GetInfo(TF_LANGBARITEMINFO* item_info) {
-  if (item_info == nullptr) {
-    return E_INVALIDARG;
-  }
-
-  // Just copies the cached TF_LANGBARITEMINFO object.
-  *item_info = *this->item_info();
-  return S_OK;
-}
-
-STDMETHODIMP TipLangBarToggleButton::InitMenu(ITfMenu* menu) {
-  HRESULT result = S_OK;
-
-  // Do nothing if the langbar item is not menu botton.
-  if (!IsMenuButton()) {
-    return result;
-  }
-
-  // Add the menu items of this object to the given ITfMenu object.
-  for (size_t i = 0; i < menu_data_size(); ++i) {
-    const TipLangBarMenuData* data = menu_data(i);
-    result = menu->AddMenuItem(i, data->flags_, nullptr, nullptr, data->text_,
-                               data->length_, nullptr);
-    if (result != S_OK) {
-      break;
-    }
-  }
-
-  return result;
-}
-
-STDMETHODIMP TipLangBarToggleButton::OnMenuSelect(UINT menu_id) {
-  // Call the TipLangBarCallback::OnMenuSelect() function to dispatch the
-  // given event.
-  TipLangBarMenuData* data = menu_data(menu_id);
-  if (data == nullptr) {
-    return E_INVALIDARG;
-  }
-  const HRESULT result = lang_bar_callback_->OnMenuSelect(
-      static_cast<TipLangBarCallback::ItemId>(data->item_id_));
-  if (result != S_OK) {
-    return result;
-  }
-  TipLangBarMenuData* selected = menu_data(menu_selected_);
-  selected->flags_ &= ~TF_LBMENUF_RADIOCHECKED;
-  data->flags_ |= TF_LBMENUF_RADIOCHECKED;
-  menu_selected_ = menu_id;
-  return result;
-}
-
-STDMETHODIMP TipLangBarToggleButton::GetIcon(HICON* icon) {
-  if (icon == nullptr) {
-    return E_INVALIDARG;
-  }
-
-  // MSIME 2012 shows special icon when the LangBar item is disabled. Here we
-  // adopt this behavior for the consistency.
-  // TODO(yukawa): Refactor this design. We should split TipLangBarToggleButton
-  //     into two different classes anyway.
-  const TipLangBarMenuData& data = !IsMenuButton() && disabled_
-                                       ? menu_data_for_disabled_
-                                       : *menu_data(menu_selected_);
-
-  //  Excerpt: http://msdn.microsoft.com/en-us/library/ms628718.aspx
-  //  The caller must free this icon when it is no longer required by
-  //  calling DestroyIcon.
-  *icon = LoadIconFromResource(TipDllModule::module_handle(), data.icon_id_);
-  return (*icon ? S_OK : E_FAIL);
-}
-
-HRESULT TipLangBarToggleButton::Init(
-    HINSTANCE instance, int string_id, const TipLangBarMenuItem* menu,
-    int count, const TipLangBarMenuItem& menu_for_disabled) {
-  TipLangBarMenuDataArray array;
-  if (SUCCEEDED(array.Init(instance, &menu_for_disabled, 1))) {
-    menu_data_for_disabled_ = *array.data(0);
-  }
-  // TODO(yuryu): Change ABSL_ARRAYSIZE to std::size when we upgrade to a  C++17
-  // compiler.
-  wchar_t buffer[ABSL_ARRAYSIZE(menu_data_for_disabled_.text_)];
-  ::LoadString(instance, string_id, buffer, std::size(buffer));
-  description_for_enabled_ = buffer;
-  return TipLangBarButton::Init(instance, string_id, menu, count);
-}
-
-// Implements the IMozcToggleButtonMenu::SelectMenuItem() function.
 HRESULT TipLangBarToggleButton::SelectMenuItem(UINT menu_id) {
   // Now SelectMenuItem may be called frequently to update LangbarItem for
-  // every key input.  So we call TipLangBarButton::OnUpdate only if any item
-  // state is updated.
+  // every key input.  So we call TipLangBarToggleButton::OnUpdate only if any
+  // item state is updated.
   bool item_state_changed = false;
   for (size_t i = 0; i < menu_data_size(); ++i) {
     TipLangBarMenuData* data = menu_data(i);
@@ -510,7 +404,7 @@ HRESULT TipLangBarToggleButton::SelectMenuItem(UINT menu_id) {
     }
   }
   if (item_state_changed) {
-    TipLangBarButton::OnUpdate(TF_LBI_ICON | TF_LBI_STATUS | TF_LBI_TEXT);
+    OnUpdate(TF_LBI_ICON | TF_LBI_STATUS | TF_LBI_TEXT);
   }
   return S_OK;
 }
@@ -518,24 +412,16 @@ HRESULT TipLangBarToggleButton::SelectMenuItem(UINT menu_id) {
 HRESULT TipLangBarToggleButton::SetEnabled(bool enabled) {
   disabled_ = !enabled;
 
-  // For menu-button, use parent implementation.
-  if (IsMenuButton()) {
-    return TipLangBarButton::SetEnabled(enabled);
-  }
-
   // For button type element, adopt special behavior to be consistent with
   // MSIME 2012's behavior.
-  // TODO(yukawa): Refactor this design. We should split TipLangBarToggleButton
-  //     into two different classes anyway.
-  SetContextMenuEnabled(enabled);
   if (enabled) {
     const HRESULT result = SelectMenuItem(menu_data(menu_selected_)->item_id_);
     SetDescription(description_for_enabled_);
-    TipLangBarButton::OnUpdate(TF_LBI_ICON | TF_LBI_STATUS | TF_LBI_TEXT);
+    OnUpdate(TF_LBI_ICON | TF_LBI_STATUS | TF_LBI_TEXT);
     return result;
   }
   SetDescription(menu_data_for_disabled_.text_);
-  TipLangBarButton::OnUpdate(TF_LBI_ICON | TF_LBI_STATUS | TF_LBI_TEXT);
+  OnUpdate(TF_LBI_ICON | TF_LBI_STATUS | TF_LBI_TEXT);
   return S_OK;
 }
 
