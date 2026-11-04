@@ -41,39 +41,39 @@
 #include "base/win32/com.h"
 #include "protocol/commands.pb.h"
 #include "win32/tip/tip_dll_module.h"
-#include "win32/tip/tip_lang_bar_callback.h"
 #include "win32/tip/tip_lang_bar_menu.h"
 #include "win32/tip/tip_resource.h"
+#include "win32/tip/tip_text_service.h"
 
 namespace mozc {
 namespace win32 {
 namespace tsf {
 namespace {
 
-TipLangBarCallback::ItemId GetItemId(DWORD composition_mode) {
+TipLangBarToggleButton::ItemId GetItemId(DWORD composition_mode) {
   switch (composition_mode) {
     case commands::DIRECT:
-      return TipLangBarCallback::kDirect;
+      return TipLangBarToggleButton::kDirect;
     case commands::HIRAGANA:
-      return TipLangBarCallback::kHiragana;
+      return TipLangBarToggleButton::kHiragana;
     case commands::FULL_KATAKANA:
-      return TipLangBarCallback::kFullKatakana;
+      return TipLangBarToggleButton::kFullKatakana;
     case commands::HALF_ASCII:
-      return TipLangBarCallback::kHalfAlphanumeric;
+      return TipLangBarToggleButton::kHalfAlphanumeric;
     case commands::FULL_ASCII:
-      return TipLangBarCallback::kFullAlphanumeric;
+      return TipLangBarToggleButton::kFullAlphanumeric;
     case commands::HALF_KATAKANA:
-      return TipLangBarCallback::kHalfKatakana;
+      return TipLangBarToggleButton::kHalfKatakana;
     default:
       LOG(ERROR) << "Unknown composition mode: " << composition_mode;
-      return TipLangBarCallback::kDirect;
+      return TipLangBarToggleButton::kDirect;
   }
 }
 
 }  // namespace
 
 // Initializes the input mode button, which is shown in the taskbar.
-HRESULT TipLangBar::InitLangBar(TipLangBarCallback* text_service) {
+HRESULT TipLangBar::InitLangBar(TipTextService* text_service) {
   HRESULT result = S_OK;
 
   // TODO(yukawa): Optimize this method. We do not need to obtain an instance of
@@ -98,28 +98,30 @@ HRESULT TipLangBar::InitLangBar(TipLangBarCallback* text_service) {
   if (!input_mode_button_for_win8_) {
     // Add the "Input Mode" button.
     constexpr TipLangBarMenuItem kInputMenu[] = {
-        {kTipLangBarItemTypeDefault, TipLangBarCallback::kHiragana,
+        {kTipLangBarItemTypeDefault, TipLangBarToggleButton::kHiragana,
          IDS_HIRAGANA, IDI_HIRAGANA},
-        {kTipLangBarItemTypeDefault, TipLangBarCallback::kFullKatakana,
+        {kTipLangBarItemTypeDefault, TipLangBarToggleButton::kFullKatakana,
          IDS_FULL_KATAKANA, IDI_FULL_KATAKANA},
-        {kTipLangBarItemTypeDefault, TipLangBarCallback::kFullAlphanumeric,
+        {kTipLangBarItemTypeDefault, TipLangBarToggleButton::kFullAlphanumeric,
          IDS_FULL_ALPHANUMERIC, IDI_FULL_ALPHANUMERIC},
-        {kTipLangBarItemTypeDefault, TipLangBarCallback::kHalfKatakana,
+        {kTipLangBarItemTypeDefault, TipLangBarToggleButton::kHalfKatakana,
          IDS_HALF_KATAKANA, IDI_HALF_KATAKANA},
-        {kTipLangBarItemTypeDefault, TipLangBarCallback::kHalfAlphanumeric,
+        {kTipLangBarItemTypeDefault, TipLangBarToggleButton::kHalfAlphanumeric,
          IDS_HALF_ALPHANUMERIC, IDI_HALF_ALPHANUMERIC},
-        {kTipLangBarItemTypeDefault, TipLangBarCallback::kDirect, IDS_DIRECT,
-         IDI_DIRECT},
+        {kTipLangBarItemTypeDefault, TipLangBarToggleButton::kDirect,
+         IDS_DIRECT, IDI_DIRECT},
         {kTipLangBarItemTypeSeparator, 0, 0, 0},
-        {kTipLangBarItemTypeDefault, TipLangBarCallback::kDictionary,
+        {kTipLangBarItemTypeDefault, TipLangBarToggleButton::kDictionary,
          IDS_DICTIONARY, 0},
-        {kTipLangBarItemTypeDefault, TipLangBarCallback::kWordRegister,
+        {kTipLangBarItemTypeDefault, TipLangBarToggleButton::kWordRegister,
          IDS_WORD_REGISTER, 0},
-        {kTipLangBarItemTypeDefault, TipLangBarCallback::kProperty,
+        {kTipLangBarItemTypeDefault, TipLangBarToggleButton::kProperty,
          IDS_PROPERTY, 0},
         {kTipLangBarItemTypeSeparator, 0, 0, 0},
-        {kTipLangBarItemTypeDefault, TipLangBarCallback::kAbout, IDS_ABOUT, 0},
-        {kTipLangBarItemTypeDefault, TipLangBarCallback::kHelp, IDS_HELP, 0},
+        {kTipLangBarItemTypeDefault, TipLangBarToggleButton::kAbout, IDS_ABOUT,
+         0},
+        {kTipLangBarItemTypeDefault, TipLangBarToggleButton::kHelp, IDS_HELP,
+         0},
     };
 
     auto input_mode_menu = MakeComPtr<TipLangBarToggleButton>(text_service);

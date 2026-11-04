@@ -47,12 +47,20 @@
 #include <string>
 #include <utility>
 
+#include "absl/log/log.h"
+#include "base/const.h"
+#include "base/process.h"
 #include "base/win32/com.h"
 #include "base/win32/com_implements.h"
+#include "protocol/commands.pb.h"
 #include "win32/base/tsf_profile.h"
 #include "win32/tip/tip_dll_module.h"
-#include "win32/tip/tip_lang_bar_callback.h"
+#include "win32/tip/tip_edit_session.h"
+#include "win32/tip/tip_input_mode_manager.h"
 #include "win32/tip/tip_resource.h"
+#include "win32/tip/tip_status.h"
+#include "win32/tip/tip_text_service.h"
+#include "win32/tip/tip_thread_context.h"
 
 namespace mozc {
 namespace win32 {
@@ -65,6 +73,12 @@ bool IsIIDOf<ITfLangBarItemButton>(REFIID riid) {
 namespace tsf {
 namespace {
 
+#ifdef GOOGLE_JAPANESE_INPUT_BUILD
+constexpr char kHelpUrl[] = "http://www.google.com/support/ime/japanese";
+#else   // GOOGLE_JAPANESE_INPUT_BUILD
+constexpr char kHelpUrl[] = "https://github.com/google/mozc";
+#endif  // GOOGLE_JAPANESE_INPUT_BUILD
+
 // Represents the cookie for the sink to a TipLangBarToggleButton object.
 constexpr int kTipLangBarMenuCookie =
     (('M' << 24) | ('o' << 16) | ('z' << 8) | ('c' << 0));
@@ -75,6 +89,100 @@ HICON LoadIconFromResource(HINSTANCE instance, UINT icon_id) {
   return static_cast<HICON>(::LoadImage(instance, MAKEINTRESOURCE(icon_id),
                                         IMAGE_ICON, icon_size, icon_size,
                                         LR_CREATEDIBSECTION));
+}
+
+HRESULT SpawnTool(const std::string& command) {
+  if (!Process::SpawnMozcProcess(kMozcTool, "--mode=" + command)) {
+    return E_FAIL;
+  }
+  return S_OK;
+}
+
+commands::CompositionMode GetMozcMode(TipLangBarToggleButton::ItemId menu_id) {
+  switch (menu_id) {
+    case TipLangBarToggleButton::kDirect:
+      return commands::DIRECT;
+    case TipLangBarToggleButton::kHiragana:
+      return commands::HIRAGANA;
+    case TipLangBarToggleButton::kFullKatakana:
+      return commands::FULL_KATAKANA;
+    case TipLangBarToggleButton::kHalfAlphanumeric:
+      return commands::HALF_ASCII;
+    case TipLangBarToggleButton::kFullAlphanumeric:
+      return commands::FULL_ASCII;
+    case TipLangBarToggleButton::kHalfKatakana:
+      return commands::HALF_KATAKANA;
+    default:
+      DLOG(FATAL) << "Unexpected item id: " << menu_id;
+      // Fall back to DIRECT in release builds.
+      return commands::DIRECT;
+  }
+}
+
+std::string GetMozcToolCommand(TipLangBarToggleButton::ItemId menu_id) {
+  switch (menu_id) {
+    case TipLangBarToggleButton::kProperty:
+      // Open the config dialog.
+      return "config_dialog";
+    case TipLangBarToggleButton::kDictionary:
+      // Open the dictionary tool.
+      return "dictionary_tool";
+    case TipLangBarToggleButton::kWordRegister:
+      // Open the word register dialog.
+      return "word_register_dialog";
+    case TipLangBarToggleButton::kAbout:
+      // Open the about dialog.
+      return "about_dialog";
+    default:
+      DLOG(FATAL) << "Unexpected item id: " << menu_id;
+      return "";
+  }
+}
+
+HRESULT HandleMenuSelect(TipTextService* text_service,
+                         TipLangBarToggleButton::ItemId menu_id) {
+  switch (menu_id) {
+    case TipLangBarToggleButton::kDirect:
+    case TipLangBarToggleButton::kHiragana:
+    case TipLangBarToggleButton::kFullKatakana:
+    case TipLangBarToggleButton::kHalfAlphanumeric:
+    case TipLangBarToggleButton::kFullAlphanumeric:
+    case TipLangBarToggleButton::kHalfKatakana: {
+      const commands::CompositionMode mozc_mode = GetMozcMode(menu_id);
+      return TipEditSession::SwitchInputModeAsync(text_service, mozc_mode)
+                 ? S_OK
+                 : E_FAIL;
+    }
+    case TipLangBarToggleButton::kProperty:
+    case TipLangBarToggleButton::kDictionary:
+    case TipLangBarToggleButton::kWordRegister:
+    case TipLangBarToggleButton::kAbout:
+      return SpawnTool(GetMozcToolCommand(menu_id));
+    case TipLangBarToggleButton::kHelp:
+      // Open the about dialog.
+      return Process::OpenBrowser(kHelpUrl) ? S_OK : E_FAIL;
+    default:
+      return S_OK;
+  }
+}
+
+HRESULT HandleItemClick(TipTextService* text_service) {
+  // Change input mode to be consistent with MSIME 2012 on Windows 8.
+  const bool open = text_service->GetThreadContext()
+                        ->GetInputModeManager()
+                        ->GetEffectiveOpenClose();
+  if (open) {
+    return TipStatus::SetIMEOpen(text_service->GetThreadManager(),
+                                 text_service->GetClientID(), false)
+               ? S_OK
+               : E_FAIL;
+  }
+
+  // Like MSIME 2012, switch to Hiragana mode when the LangBar button is
+  // clicked.
+  return TipEditSession::SwitchInputModeAsync(text_service, commands::HIRAGANA)
+             ? S_OK
+             : E_FAIL;
 }
 
 }  // namespace
@@ -115,8 +223,8 @@ TipLangBarMenuData* TipLangBarMenuDataArray::data(size_t i) {
 
 // Implements the constructor of the TipLangBarToggleButton class.
 TipLangBarToggleButton::TipLangBarToggleButton(
-    wil::com_ptr_nothrow<TipLangBarCallback> lang_bar_callback)
-    : lang_bar_callback_(std::move(lang_bar_callback)),
+    wil::com_ptr_nothrow<TipTextService> text_service)
+    : text_service_(std::move(text_service)),
       menu_selected_(0),
       disabled_(false) {
   // Initialize its TF_LANGBARITEMINFO object, which contains the properties of
@@ -178,7 +286,7 @@ STDMETHODIMP TipLangBarToggleButton::GetTooltipString(BSTR* tooltip) {
 STDMETHODIMP TipLangBarToggleButton::OnClick(TfLBIClick click, POINT point,
                                              const RECT* rect) {
   if (click == TF_LBI_CLK_LEFT) {
-    return lang_bar_callback_->OnItemClick(item_info_.szDescription);
+    return HandleItemClick(text_service_.get());
   }
 
   // If context menu is disabled, do nothing.
@@ -255,8 +363,7 @@ STDMETHODIMP TipLangBarToggleButton::OnClick(TfLBIClick click, POINT point,
   if (!result) {
     return E_FAIL;
   }
-  return lang_bar_callback_->OnMenuSelect(
-      static_cast<TipLangBarCallback::ItemId>(result));
+  return HandleMenuSelect(text_service_.get(), static_cast<ItemId>(result));
 }
 
 // Implements the ITfLangBarItemButton::GetText() function.

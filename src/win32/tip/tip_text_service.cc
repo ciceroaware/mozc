@@ -67,7 +67,6 @@
 #include "win32/tip/tip_input_mode_manager.h"
 #include "win32/tip/tip_keyevent_handler.h"
 #include "win32/tip/tip_lang_bar.h"
-#include "win32/tip/tip_lang_bar_callback.h"
 #include "win32/tip/tip_preferred_touch_keyboard.h"
 #include "win32/tip/tip_private_context.h"
 #include "win32/tip/tip_reconvert_function.h"
@@ -91,11 +90,6 @@ bool IsIIDOf<tsf::TipTextService>(REFIID riid) {
   return false;
 }
 
-template <>
-bool IsIIDOf<tsf::TipLangBarCallback>(REFIID riid) {
-  return false;
-}
-
 namespace tsf {
 namespace {
 
@@ -114,7 +108,6 @@ constexpr UINT kUpdateUIMessage = WM_USER;
 
 #ifdef GOOGLE_JAPANESE_INPUT_BUILD
 
-constexpr char kHelpUrl[] = "http://www.google.com/support/ime/japanese";
 constexpr wchar_t kTaskWindowClassName[] =
     L"Google Japanese Input Task Message Window";
 
@@ -148,7 +141,6 @@ constexpr GUID kTipFunctionProvider = {
 
 #else  // GOOGLE_JAPANESE_INPUT_BUILD
 
-constexpr char kHelpUrl[] = "https://github.com/google/mozc";
 constexpr wchar_t kTaskWindowClassName[] =
     L"Mozc Immersive Task Message Window";
 
@@ -187,47 +179,6 @@ HRESULT SpawnTool(const std::string& command) {
     return E_FAIL;
   }
   return S_OK;
-}
-
-commands::CompositionMode GetMozcMode(TipLangBarCallback::ItemId menu_id) {
-  switch (menu_id) {
-    case TipLangBarCallback::kDirect:
-      return commands::DIRECT;
-    case TipLangBarCallback::kHiragana:
-      return commands::HIRAGANA;
-    case TipLangBarCallback::kFullKatakana:
-      return commands::FULL_KATAKANA;
-    case TipLangBarCallback::kHalfAlphanumeric:
-      return commands::HALF_ASCII;
-    case TipLangBarCallback::kFullAlphanumeric:
-      return commands::FULL_ASCII;
-    case TipLangBarCallback::kHalfKatakana:
-      return commands::HALF_KATAKANA;
-    default:
-      DLOG(FATAL) << "Unexpected item id: " << menu_id;
-      // Fall back to DIRECT in release builds.
-      return commands::DIRECT;
-  }
-}
-
-std::string GetMozcToolCommand(TipLangBarCallback::ItemId menu_id) {
-  switch (menu_id) {
-    case TipLangBarCallback::kProperty:
-      // Open the config dialog.
-      return "config_dialog";
-    case TipLangBarCallback::kDictionary:
-      // Open the dictionary tool.
-      return "dictionary_tool";
-    case TipLangBarCallback::kWordRegister:
-      // Open the word register dialog.
-      return "word_register_dialog";
-    case TipLangBarCallback::kAbout:
-      // Open the about dialog.
-      return "about_dialog";
-    default:
-      DLOG(FATAL) << "Unexpected item id: " << menu_id;
-      return "";
-  }
 }
 
 void EnsureKanaLockUnlocked() {
@@ -405,8 +356,7 @@ class TipTextServiceImpl
           ITfTextInputProcessorEx, ITfDisplayAttributeProvider,
           ITfThreadMgrEventSink, ITfThreadFocusSink, ITfTextEditSink,
           ITfTextLayoutSink, ITfKeyEventSink, ITfFnConfigure,
-          ITfFunctionProvider, ITfCompartmentEventSink, TipLangBarCallback,
-          TipTextService> {
+          ITfFunctionProvider, ITfCompartmentEventSink, TipTextService> {
  public:
   TipTextServiceImpl()
       : client_id_(TF_CLIENTID_NULL),
@@ -897,45 +847,6 @@ class TipTextServiceImpl
       TipEditSession::OnOpenCloseChangedAsync(this);
     }
     return S_OK;
-  }
-
-  // TipLangBarCallback
-  STDMETHODIMP OnMenuSelect(ItemId menu_id) override {
-    switch (menu_id) {
-      case TipLangBarCallback::kDirect:
-      case TipLangBarCallback::kHiragana:
-      case TipLangBarCallback::kFullKatakana:
-      case TipLangBarCallback::kHalfAlphanumeric:
-      case TipLangBarCallback::kFullAlphanumeric:
-      case TipLangBarCallback::kHalfKatakana: {
-        const commands::CompositionMode mozc_mode = GetMozcMode(menu_id);
-        return TipEditSession::SwitchInputModeAsync(this, mozc_mode);
-      }
-      case TipLangBarCallback::kProperty:
-      case TipLangBarCallback::kDictionary:
-      case TipLangBarCallback::kWordRegister:
-      case TipLangBarCallback::kAbout:
-        return SpawnTool(GetMozcToolCommand(menu_id));
-      case TipLangBarCallback::kHelp:
-        // Open the about dialog.
-        return Process::OpenBrowser(kHelpUrl) ? S_OK : E_FAIL;
-      default:
-        return S_OK;
-    }
-  }
-  STDMETHODIMP OnItemClick(const wchar_t* description) override {
-    // Change input mode to be consistent with MSIME 2012 on Windows 8.
-    const bool open =
-        thread_context_->GetInputModeManager()->GetEffectiveOpenClose();
-    if (open) {
-      return TipStatus::SetIMEOpen(thread_mgr_.get(), client_id_, false)
-                 ? S_OK
-                 : E_FAIL;
-    }
-
-    // Like MSIME 2012, switch to Hiragana mode when the LangBar button is
-    // clicked.
-    return TipEditSession::SwitchInputModeAsync(this, commands::HIRAGANA);
   }
 
   // TipTextService

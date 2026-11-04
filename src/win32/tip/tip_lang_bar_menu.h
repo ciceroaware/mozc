@@ -41,7 +41,7 @@
 #include <vector>
 
 #include "win32/tip/tip_dll_module.h"
-#include "win32/tip/tip_lang_bar_callback.h"
+#include "win32/tip/tip_text_service.h"
 
 namespace mozc {
 namespace win32 {
@@ -98,8 +98,27 @@ class TipLangBarMenuDataArray {
 class TipLangBarToggleButton
     : public TipComImplements<ITfLangBarItemButton, ITfSource> {
  public:
+  enum ItemId {
+    // For input mode selection
+    kDirect = 10,
+    kHiragana = 11,
+    kFullKatakana = 12,
+    kHalfAlphanumeric = 13,
+    kFullAlphanumeric = 14,
+    kHalfKatakana = 15,
+
+    // Tool menu
+    kProperty = 20,
+    kDictionary = 21,
+    kWordRegister = 22,
+
+    // Help Menu
+    kHelp = 30,
+    kAbout = 31,
+  };
+
   explicit TipLangBarToggleButton(
-      wil::com_ptr_nothrow<TipLangBarCallback> lang_bar_callback);
+      wil::com_ptr_nothrow<TipTextService> text_service);
 
   // The ITfLangBarItem interface methods
   STDMETHODIMP GetInfo(TF_LANGBARITEMINFO* item_info) override;
@@ -148,9 +167,9 @@ class TipLangBarToggleButton
   size_t menu_data_size() const;
 
   wil::com_ptr_nothrow<ITfLangBarItemSink> item_sink_;
-  // Save the TipLangBarCallback object that owns this button to prevent the
+  // Save the TipTextService object that owns this button to prevent the
   // object from being deleted.
-  wil::com_ptr_nothrow<TipLangBarCallback> lang_bar_callback_;
+  wil::com_ptr_nothrow<TipTextService> text_service_;
 
   // Represents the information of an instance copied to the TSF manager.
   // The TSF manager uses this information to identifies an instance as

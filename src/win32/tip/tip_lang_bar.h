@@ -38,8 +38,8 @@
 
 #include <cstdint>
 
-#include "win32/tip/tip_lang_bar_callback.h"
 #include "win32/tip/tip_lang_bar_menu.h"
+#include "win32/tip/tip_text_service.h"
 
 namespace mozc {
 namespace win32 {
@@ -54,7 +54,7 @@ class TipLangBar {
   ~TipLangBar() = default;
 
   // initialize and uninitialize ImeLangBarItemButton object.
-  HRESULT InitLangBar(TipLangBarCallback* text_service);
+  HRESULT InitLangBar(TipTextService* text_service);
   HRESULT UninitLangBar();
 
   // Updates the selected menu in the language bar.
