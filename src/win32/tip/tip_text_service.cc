@@ -66,12 +66,12 @@
 #include "win32/tip/tip_enum_display_attributes.h"
 #include "win32/tip/tip_input_mode_manager.h"
 #include "win32/tip/tip_keyevent_handler.h"
-#include "win32/tip/tip_lang_bar.h"
 #include "win32/tip/tip_preferred_touch_keyboard.h"
 #include "win32/tip/tip_private_context.h"
 #include "win32/tip/tip_reconvert_function.h"
 #include "win32/tip/tip_resource.h"
 #include "win32/tip/tip_status.h"
+#include "win32/tip/tip_system_tray_icon.h"
 #include "win32/tip/tip_thread_context.h"
 #include "win32/tip/tip_ui_handler.h"
 
@@ -885,7 +885,7 @@ class TipTextServiceImpl
   }
 
   void UpdateLangbar(bool enabled, uint32_t mozc_mode) override {
-    langbar_.UpdateMenu(enabled, mozc_mode);
+    langbar_.Update(enabled, mozc_mode);
   }
 
   bool IsLangbarInitialized() const override {
@@ -1028,9 +1028,9 @@ class TipTextServiceImpl
     return result;
   }
 
-  HRESULT InitLanguageBar() { return langbar_.InitLangBar(this); }
+  HRESULT InitLanguageBar() { return langbar_.Init(this); }
 
-  HRESULT UninitLanguageBar() { return langbar_.UninitLangBar(); }
+  HRESULT UninitLanguageBar() { return langbar_.Uninit(); }
 
   HRESULT InitKeyEventSink() {
     if (thread_mgr_ == nullptr) {
@@ -1381,7 +1381,7 @@ class TipTextServiceImpl
   TfGuidAtom converted_attribute_;
 
   // Used for LangBar integration.
-  TipLangBar langbar_;
+  TipSystemTrayIcon langbar_;
 
   using PreservedKeyMap = absl::flat_hash_map<GUID, UINT, GuidHash>;
   using PrivateContextMap =

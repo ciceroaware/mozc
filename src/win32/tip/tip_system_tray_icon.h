@@ -27,38 +27,36 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#ifndef MOZC_WIN32_TIP_TIP_LANG_BAR_H_
-#define MOZC_WIN32_TIP_TIP_LANG_BAR_H_
+#ifndef MOZC_WIN32_TIP_TIP_SYSTEM_TRAY_ICON_H_
+#define MOZC_WIN32_TIP_TIP_SYSTEM_TRAY_ICON_H_
 
-#include <ctffunc.h>
-#include <msctf.h>
-#include <unknwn.h>
+#include <ctfutb.h>
 #include <wil/com.h>
 #include <windows.h>
 
 #include <cstdint>
 
-#include "win32/tip/tip_lang_bar_menu.h"
 #include "win32/tip/tip_text_service.h"
 
 namespace mozc {
 namespace win32 {
 namespace tsf {
 
-// TODO: https://github.com/google/mozc/issues/1600 - Rename classes here.
-class TipLangBar {
+// Manages the IME mode icon in the system tray of the taskbar. TSF exposes it
+// as a language bar item with GUID_LBI_INPUTMODE.
+class TipSystemTrayIcon {
  public:
-  TipLangBar() = default;
-  TipLangBar(const TipLangBar&) = delete;
-  TipLangBar& operator=(const TipLangBar&) = delete;
-  ~TipLangBar() = default;
+  TipSystemTrayIcon() = default;
+  TipSystemTrayIcon(const TipSystemTrayIcon&) = delete;
+  TipSystemTrayIcon& operator=(const TipSystemTrayIcon&) = delete;
+  ~TipSystemTrayIcon() = default;
 
-  // initialize and uninitialize ImeLangBarItemButton object.
-  HRESULT InitLangBar(TipTextService* text_service);
-  HRESULT UninitLangBar();
+  // initialize and uninitialize the system tray icon.
+  HRESULT Init(TipTextService* text_service);
+  HRESULT Uninit();
 
-  // Updates the selected menu in the language bar.
-  HRESULT UpdateMenu(bool enabled, uint32_t composition_mode);
+  // Updates the system tray icon.
+  HRESULT Update(bool enabled, uint32_t composition_mode);
 
   // Returns true if this instance is already initialized.
   bool IsInitialized() const;
@@ -72,11 +70,11 @@ class TipLangBar {
 
   // Represents the input mode button, which is shown in the taskbar as the IME
   // mode icon on Windows 8 and later.
-  wil::com_ptr_nothrow<TipLangBarToggleButton> input_mode_button_for_win8_;
+  wil::com_ptr_nothrow<ITfLangBarItemButton> input_mode_button_for_win8_;
 };
 
 }  // namespace tsf
 }  // namespace win32
 }  // namespace mozc
 
-#endif  // MOZC_WIN32_TIP_TIP_LANG_BAR_H_
+#endif  // MOZC_WIN32_TIP_TIP_SYSTEM_TRAY_ICON_H_

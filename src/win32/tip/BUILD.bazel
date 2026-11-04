@@ -208,12 +208,12 @@ mozc_cc_library(
         ":tip_enum_display_attributes",
         ":tip_input_mode_manager",
         ":tip_keyevent_handler",
-        ":tip_lang_bar",
         ":tip_preferred_touch_keyboard",
         ":tip_private_context_h",
         ":tip_reconvert_function",
         ":tip_resource",
         ":tip_status",
+        ":tip_system_tray_icon",
         ":tip_text_service",
         ":tip_thread_context",
         ":tip_ui_handler",
@@ -369,9 +369,9 @@ mozc_cc_library(
 )
 
 mozc_cc_library(
-    name = "tip_lang_bar_menu",
-    srcs = ["tip_lang_bar_menu.cc"],
-    hdrs = ["tip_lang_bar_menu.h"],
+    name = "tip_system_tray_icon",
+    srcs = ["tip_system_tray_icon.cc"],
+    hdrs = ["tip_system_tray_icon.h"],
     features = features_gdi(),
     tags = MOZC_TAGS.WIN_ONLY,
     target_compatible_with = ["@platforms//os:windows"],
@@ -389,26 +389,8 @@ mozc_cc_library(
         "//base/win32:com_implements",
         "//bazel/win32:user32",
         "//protocol:commands_cc_proto",
-        "//win32/base:tsf_profile",
-        "@com_google_absl//absl/log",
-        "@com_microsoft_wil//:wil",
-    ],
-)
-
-mozc_cc_library(
-    name = "tip_lang_bar",
-    srcs = ["tip_lang_bar.cc"],
-    hdrs = ["tip_lang_bar.h"],
-    tags = MOZC_TAGS.WIN_ONLY,
-    target_compatible_with = ["@platforms//os:windows"],
-    deps = [
-        ":tip_dll_module",
-        ":tip_lang_bar_menu",
-        ":tip_resource",
-        ":tip_text_service",
-        "//base/win32:com",
-        "//protocol:commands_cc_proto",
         "//win32/base:msctf_dll",  # buildcleaner: keep
+        "//win32/base:tsf_profile",
         "@com_google_absl//absl/log",
         "@com_microsoft_wil//:wil",
     ],

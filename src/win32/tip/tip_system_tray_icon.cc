@@ -27,14 +27,12 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#include "win32/tip/tip_lang_bar_menu.h"
+#include "win32/tip/tip_system_tray_icon.h"
 
-#include <atlbase.h>
-#include <atltypes.h>
 #include <commctrl.h>
 #include <ctffunc.h>
 #include <ctfutb.h>
-#include <ole2.h>
+#include <oleauto.h>
 #include <olectl.h>
 #include <strsafe.h>
 #include <wil/com.h>
@@ -44,8 +42,11 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdint>
+#include <iterator>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "absl/log/log.h"
 #include "base/const.h"
@@ -90,6 +91,139 @@ HICON LoadIconFromResource(HINSTANCE instance, UINT icon_id) {
                                         IMAGE_ICON, icon_size, icon_size,
                                         LR_CREATEDIBSECTION));
 }
+
+enum TipLangBarItemFlags {
+  kTipLangBarItemTypeDefault = 0,
+  kTipLangBarItemTypeChecked = TF_LBMENUF_CHECKED,  // 0x1
+  // ImeLangBarItemTypeSubMenu = TF_LBMENUF_SUBMENU  // 0x2 (not supported)
+  kTipLangBarItemTypeSeparator = TF_LBMENUF_SEPARATOR,        // 0x4
+  kTipLangBarItemTypeRadioChecked = TF_LBMENUF_RADIOCHECKED,  // 0x8
+  kTipLangBarItemTypeGrayed = TF_LBMENUF_GRAYED,              // 0x10
+};
+
+// Represents a tuple to specify the content of a language bar menu item.
+struct TipLangBarMenuItem {
+  int flags_;
+  UINT item_id_;
+  UINT text_id_;
+  UINT icon_id_;
+};
+
+// Represents the data possessed internally by a language bar menu item.
+struct TipLangBarMenuData {
+  int flags_;
+  UINT item_id_;
+  UINT text_id_;
+  UINT icon_id_;
+  int length_;
+  wchar_t text_[TF_LBI_DESC_MAXLEN];
+};
+
+// Represents the data possessed by a language bar menu.
+class TipLangBarMenuDataArray {
+ public:
+  HRESULT Init(HINSTANCE instance, const TipLangBarMenuItem* menu, int count);
+
+  size_t size() const;
+  TipLangBarMenuData* data(size_t i);
+
+ private:
+  std::vector<TipLangBarMenuData> data_;
+};
+
+// Represents the input mode button, which is shown in the taskbar as the IME
+// mode icon. Left click toggles the IME open/close status and right click
+// shows the context menu.
+class TipLangBarToggleButton
+    : public TipComImplements<ITfLangBarItemButton, ITfSource> {
+ public:
+  enum ItemId {
+    // For input mode selection
+    kDirect = 10,
+    kHiragana = 11,
+    kFullKatakana = 12,
+    kHalfAlphanumeric = 13,
+    kFullAlphanumeric = 14,
+    kHalfKatakana = 15,
+
+    // Tool menu
+    kProperty = 20,
+    kDictionary = 21,
+    kWordRegister = 22,
+
+    // Help Menu
+    kHelp = 30,
+    kAbout = 31,
+  };
+
+  explicit TipLangBarToggleButton(
+      wil::com_ptr_nothrow<TipTextService> text_service);
+
+  // The ITfLangBarItem interface methods
+  STDMETHODIMP GetInfo(TF_LANGBARITEMINFO* item_info) override;
+  STDMETHODIMP GetStatus(DWORD* status) override;
+  STDMETHODIMP Show(BOOL show) override;
+  STDMETHODIMP GetTooltipString(BSTR* tooltip) override;
+
+  // The ITfLangBarItemButton interface methods
+  STDMETHODIMP OnClick(TfLBIClick click, POINT point,
+                       const RECT* rect) override;
+  STDMETHODIMP InitMenu(ITfMenu* menu) override;
+  STDMETHODIMP OnMenuSelect(UINT menu_id) override;
+  STDMETHODIMP GetIcon(HICON* icon) override;
+  STDMETHODIMP GetText(BSTR* text) override;
+
+  // The ITfSource interface methods
+  STDMETHODIMP AdviseSink(REFIID interface_id, IUnknown* unknown,
+                          DWORD* cookie) override;
+  STDMETHODIMP UnadviseSink(DWORD cookie) override;
+
+  // Initializes an ImeButtonMenu instance.
+  // This function allocates resources for an ImeButtonMenu instance.
+  HRESULT Init(HINSTANCE instance, int string_id,
+               const TipLangBarMenuItem* menu, int count,
+               const TipLangBarMenuItem& menu_for_disabled);
+
+  // Selects a menu item which has the given |menu_id|.
+  HRESULT SelectMenuItem(UINT menu_id);
+
+  // Sets the status of this language bar menu.
+  HRESULT SetEnabled(bool enabled);
+
+ private:
+  // Notifies the language bar of a change in a language bar item.
+  HRESULT OnUpdate(DWORD update_flag);
+
+  // Update the item description. The caller is also responsible for calling
+  // OnUpdate method to notify the change to the system.
+  void SetDescription(const std::wstring& description);
+
+  // Returns the i-th data in the language bar menu.
+  // Returns nullptr if i is out of bounds.
+  TipLangBarMenuData* menu_data(size_t i);
+
+  // Returns the size of the language bar menu.
+  size_t menu_data_size() const;
+
+  wil::com_ptr_nothrow<ITfLangBarItemSink> item_sink_;
+  // Save the TipTextService object that owns this button to prevent the
+  // object from being deleted.
+  wil::com_ptr_nothrow<TipTextService> text_service_;
+
+  // Represents the information of an instance copied to the TSF manager.
+  // The TSF manager uses this information to identifies an instance as
+  // a menu button.
+  TF_LANGBARITEMINFO item_info_;
+
+  // Represents the data possessed by the language bar menu.
+  TipLangBarMenuDataArray menu_data_;
+
+  // Represents the index of the selected menu item.
+  UINT menu_selected_;
+  bool disabled_;
+  std::wstring description_for_enabled_;
+  TipLangBarMenuData menu_data_for_disabled_;
+};
 
 HRESULT SpawnTool(const std::string& command) {
   if (!Process::SpawnMozcProcess(kMozcTool, "--mode=" + command)) {
@@ -184,8 +318,6 @@ HRESULT HandleItemClick(TipTextService* text_service) {
              ? S_OK
              : E_FAIL;
 }
-
-}  // namespace
 
 HRESULT TipLangBarMenuDataArray::Init(HINSTANCE instance,
                                       const TipLangBarMenuItem* menu,
@@ -530,6 +662,131 @@ HRESULT TipLangBarToggleButton::SetEnabled(bool enabled) {
   SetDescription(menu_data_for_disabled_.text_);
   OnUpdate(TF_LBI_ICON | TF_LBI_STATUS | TF_LBI_TEXT);
   return S_OK;
+}
+
+TipLangBarToggleButton::ItemId GetItemId(DWORD composition_mode) {
+  switch (composition_mode) {
+    case commands::DIRECT:
+      return TipLangBarToggleButton::kDirect;
+    case commands::HIRAGANA:
+      return TipLangBarToggleButton::kHiragana;
+    case commands::FULL_KATAKANA:
+      return TipLangBarToggleButton::kFullKatakana;
+    case commands::HALF_ASCII:
+      return TipLangBarToggleButton::kHalfAlphanumeric;
+    case commands::FULL_ASCII:
+      return TipLangBarToggleButton::kFullAlphanumeric;
+    case commands::HALF_KATAKANA:
+      return TipLangBarToggleButton::kHalfKatakana;
+    default:
+      LOG(ERROR) << "Unknown composition mode: " << composition_mode;
+      return TipLangBarToggleButton::kDirect;
+  }
+}
+
+}  // namespace
+
+// Initializes the input mode button, which is shown in the taskbar.
+HRESULT TipSystemTrayIcon::Init(TipTextService* text_service) {
+  HRESULT result = S_OK;
+
+  // TODO(yukawa): Optimize this method. We do not need to obtain an instance of
+  // ITfLangBarItemMgr unless there remains something to be initialized for
+  // LangBar.
+
+  // A workaround to satisfy both b/6106437 and b/6641460.
+  // Keep the instance in |lang_bar_item_mgr_|.
+  if (!lang_bar_item_mgr_) {
+    result = TF_CreateLangBarItemMgr(lang_bar_item_mgr_.put());
+    if (FAILED(result)) {
+      return result;
+    }
+    if (!lang_bar_item_mgr_) {
+      return E_FAIL;
+    }
+  }
+
+  const TipLangBarMenuItem kInputMenuDisabled = {kTipLangBarItemTypeDefault, 0,
+                                                 IDS_DISABLED, IDI_DISABLED};
+
+  if (!input_mode_button_for_win8_) {
+    // Add the "Input Mode" button.
+    constexpr TipLangBarMenuItem kInputMenu[] = {
+        {kTipLangBarItemTypeDefault, TipLangBarToggleButton::kHiragana,
+         IDS_HIRAGANA, IDI_HIRAGANA},
+        {kTipLangBarItemTypeDefault, TipLangBarToggleButton::kFullKatakana,
+         IDS_FULL_KATAKANA, IDI_FULL_KATAKANA},
+        {kTipLangBarItemTypeDefault, TipLangBarToggleButton::kFullAlphanumeric,
+         IDS_FULL_ALPHANUMERIC, IDI_FULL_ALPHANUMERIC},
+        {kTipLangBarItemTypeDefault, TipLangBarToggleButton::kHalfKatakana,
+         IDS_HALF_KATAKANA, IDI_HALF_KATAKANA},
+        {kTipLangBarItemTypeDefault, TipLangBarToggleButton::kHalfAlphanumeric,
+         IDS_HALF_ALPHANUMERIC, IDI_HALF_ALPHANUMERIC},
+        {kTipLangBarItemTypeDefault, TipLangBarToggleButton::kDirect,
+         IDS_DIRECT, IDI_DIRECT},
+        {kTipLangBarItemTypeSeparator, 0, 0, 0},
+        {kTipLangBarItemTypeDefault, TipLangBarToggleButton::kDictionary,
+         IDS_DICTIONARY, 0},
+        {kTipLangBarItemTypeDefault, TipLangBarToggleButton::kWordRegister,
+         IDS_WORD_REGISTER, 0},
+        {kTipLangBarItemTypeDefault, TipLangBarToggleButton::kProperty,
+         IDS_PROPERTY, 0},
+        {kTipLangBarItemTypeSeparator, 0, 0, 0},
+        {kTipLangBarItemTypeDefault, TipLangBarToggleButton::kAbout, IDS_ABOUT,
+         0},
+        {kTipLangBarItemTypeDefault, TipLangBarToggleButton::kHelp, IDS_HELP,
+         0},
+    };
+
+    auto input_mode_menu = MakeComPtr<TipLangBarToggleButton>(text_service);
+    if (input_mode_menu == nullptr) {
+      return E_OUTOFMEMORY;
+    }
+
+    result = input_mode_menu->Init(TipDllModule::module_handle(),
+                                   IDS_WIN8_TRAY_ITEM, kInputMenu,
+                                   std::size(kInputMenu), kInputMenuDisabled);
+    if (FAILED(result)) {
+      return result;
+    }
+    result = lang_bar_item_mgr_->AddItem(input_mode_menu.get());
+    input_mode_button_for_win8_ = std::move(input_mode_menu);
+  }
+
+  return result;
+}
+
+// IMPORTANT: See b/6106437 and b/6641460 before you change this method.
+HRESULT TipSystemTrayIcon::Uninit() {
+  HRESULT result = S_OK;
+
+  // A workaround to satisfy both b/6106437 and b/6641460.
+  // Retrieve the instance from |lang_bar_item_mgr_|.
+  wil::com_ptr_nothrow<ITfLangBarItemMgr> item = std::move(lang_bar_item_mgr_);
+  if (!item) {
+    return E_FAIL;
+  }
+
+  if (input_mode_button_for_win8_) {
+    item->RemoveItem(input_mode_button_for_win8_.get());
+    input_mode_button_for_win8_.reset();
+  }
+  return result;
+}
+
+HRESULT TipSystemTrayIcon::Update(bool enabled, uint32_t composition_mode) {
+  // The downcast is safe because |input_mode_button_for_win8_| only holds a
+  // TipLangBarToggleButton created in Init().
+  auto* button =
+      static_cast<TipLangBarToggleButton*>(input_mode_button_for_win8_.get());
+  const UINT menu_id = GetItemId(composition_mode);
+  button->SelectMenuItem(menu_id);
+  button->SetEnabled(enabled);
+  return S_OK;
+}
+
+bool TipSystemTrayIcon::IsInitialized() const {
+  return input_mode_button_for_win8_ != nullptr;
 }
 
 }  // namespace tsf
