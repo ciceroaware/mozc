@@ -413,8 +413,8 @@ class TipTextServiceImpl
     // Stop advising the ITfKeyEvent events.
     UninitKeyEventSink();
 
-    // Remove our button menus from the language bar.
-    UninitLanguageBar();
+    // Remove the IME mode icon from the system tray.
+    UninitSystemTrayIcon();
 
     // Stop advising the ITfFunctionProvider events.
     UninitFunctionProvider();
@@ -515,9 +515,9 @@ class TipTextServiceImpl
       return Deactivate();
     }
 
-    result = InitLanguageBar();
+    result = InitSystemTrayIcon();
     if (FAILED(result)) {
-      LOG(ERROR) << "InitLanguageBar failed: " << result;
+      LOG(ERROR) << "InitSystemTrayIcon failed: " << result;
       return result;
     }
 
@@ -884,12 +884,8 @@ class TipTextServiceImpl
     PostMessageW(task_window_handle_, kUpdateUIMessage, 0, 0);
   }
 
-  void UpdateLangbar(bool enabled, uint32_t mozc_mode) override {
-    langbar_.Update(enabled, mozc_mode);
-  }
-
-  bool IsLangbarInitialized() const override {
-    return langbar_.IsInitialized();
+  void UpdateSystemTrayIcon(bool enabled, uint32_t mozc_mode) override {
+    system_tray_icon_.Update(enabled, mozc_mode);
   }
 
  private:
@@ -1028,9 +1024,9 @@ class TipTextServiceImpl
     return result;
   }
 
-  HRESULT InitLanguageBar() { return langbar_.Init(this); }
+  HRESULT InitSystemTrayIcon() { return system_tray_icon_.Init(this); }
 
-  HRESULT UninitLanguageBar() { return langbar_.Uninit(); }
+  HRESULT UninitSystemTrayIcon() { return system_tray_icon_.Uninit(); }
 
   HRESULT InitKeyEventSink() {
     if (thread_mgr_ == nullptr) {
@@ -1380,8 +1376,8 @@ class TipTextServiceImpl
   TfGuidAtom input_attribute_;
   TfGuidAtom converted_attribute_;
 
-  // Used for LangBar integration.
-  TipSystemTrayIcon langbar_;
+  // Used for the IME mode icon in the system tray.
+  TipSystemTrayIcon system_tray_icon_;
 
   using PreservedKeyMap = absl::flat_hash_map<GUID, UINT, GuidHash>;
   using PrivateContextMap =

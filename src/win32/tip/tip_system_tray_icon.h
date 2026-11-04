@@ -55,11 +55,8 @@ class TipSystemTrayIcon {
   HRESULT Init(TipTextService* text_service);
   HRESULT Uninit();
 
-  // Updates the system tray icon.
-  HRESULT Update(bool enabled, uint32_t composition_mode);
-
-  // Returns true if this instance is already initialized.
-  bool IsInitialized() const;
+  // Updates the system tray icon. Does nothing if not initialized.
+  void Update(bool enabled, uint32_t composition_mode);
 
  private:
   // Represents the language bar item manager.
@@ -69,8 +66,8 @@ class TipSystemTrayIcon {
   wil::com_ptr_nothrow<ITfLangBarItemMgr> lang_bar_item_mgr_;
 
   // Represents the input mode button, which is shown in the taskbar as the IME
-  // mode icon on Windows 8 and later.
-  wil::com_ptr_nothrow<ITfLangBarItemButton> input_mode_button_for_win8_;
+  // mode icon.
+  wil::com_ptr_nothrow<ITfLangBarItemButton> input_mode_button_;
 };
 
 }  // namespace tsf

@@ -141,7 +141,7 @@ BEGIN
     IDS_IME_DISPLAYNAME     "Mozc"
     IDS_TEXTSERVICE_DISPLAYNAME_SYNONYM  "Mozc"
 #endif
-    IDS_WIN8_TRAY_ITEM      "右クリックで IME のオプションを表示します"
+    IDS_SYSTEM_TRAY_ICON    "右クリックで IME のオプションを表示します"
     IDS_DIRECT              "直接入力"
     IDS_HIRAGANA            "ひらがな"
     IDS_PROPERTY            "プロパティ"
@@ -181,7 +181,7 @@ BEGIN
     IDS_IME_DISPLAYNAME     "Mozc"
     IDS_TEXTSERVICE_DISPLAYNAME_SYNONYM  "Mozc"
 #endif
-    IDS_WIN8_TRAY_ITEM      "Right click to show IME options"
+    IDS_SYSTEM_TRAY_ICON    "Right click to show IME options"
     IDS_DIRECT              "Direct Input"
     IDS_HIRAGANA            "Hiragana"
     IDS_PROPERTY            "Properties"

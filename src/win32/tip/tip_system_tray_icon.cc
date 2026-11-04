@@ -709,7 +709,7 @@ HRESULT TipSystemTrayIcon::Init(TipTextService* text_service) {
   const TipLangBarMenuItem kInputMenuDisabled = {kTipLangBarItemTypeDefault, 0,
                                                  IDS_DISABLED, IDI_DISABLED};
 
-  if (!input_mode_button_for_win8_) {
+  if (!input_mode_button_) {
     // Add the "Input Mode" button.
     constexpr TipLangBarMenuItem kInputMenu[] = {
         {kTipLangBarItemTypeDefault, TipLangBarToggleButton::kHiragana,
@@ -744,13 +744,13 @@ HRESULT TipSystemTrayIcon::Init(TipTextService* text_service) {
     }
 
     result = input_mode_menu->Init(TipDllModule::module_handle(),
-                                   IDS_WIN8_TRAY_ITEM, kInputMenu,
+                                   IDS_SYSTEM_TRAY_ICON, kInputMenu,
                                    std::size(kInputMenu), kInputMenuDisabled);
     if (FAILED(result)) {
       return result;
     }
     result = lang_bar_item_mgr_->AddItem(input_mode_menu.get());
-    input_mode_button_for_win8_ = std::move(input_mode_menu);
+    input_mode_button_ = std::move(input_mode_menu);
   }
 
   return result;
@@ -767,26 +767,24 @@ HRESULT TipSystemTrayIcon::Uninit() {
     return E_FAIL;
   }
 
-  if (input_mode_button_for_win8_) {
-    item->RemoveItem(input_mode_button_for_win8_.get());
-    input_mode_button_for_win8_.reset();
+  if (input_mode_button_) {
+    item->RemoveItem(input_mode_button_.get());
+    input_mode_button_.reset();
   }
   return result;
 }
 
-HRESULT TipSystemTrayIcon::Update(bool enabled, uint32_t composition_mode) {
-  // The downcast is safe because |input_mode_button_for_win8_| only holds a
+void TipSystemTrayIcon::Update(bool enabled, uint32_t composition_mode) {
+  if (!input_mode_button_) {
+    return;
+  }
+
+  // The downcast is safe because |input_mode_button_| only holds a
   // TipLangBarToggleButton created in Init().
-  auto* button =
-      static_cast<TipLangBarToggleButton*>(input_mode_button_for_win8_.get());
+  auto* button = static_cast<TipLangBarToggleButton*>(input_mode_button_.get());
   const UINT menu_id = GetItemId(composition_mode);
   button->SelectMenuItem(menu_id);
   button->SetEnabled(enabled);
-  return S_OK;
-}
-
-bool TipSystemTrayIcon::IsInitialized() const {
-  return input_mode_button_for_win8_ != nullptr;
 }
 
 }  // namespace tsf

@@ -48,14 +48,9 @@ namespace {
 
 using ::mozc::commands::CompositionMode;
 
-void UpdateLanguageBarOnFocusChange(TipTextService* text_service,
-                                    ITfDocumentMgr* document_manager) {
+void UpdateSystemTrayIconOnFocusChange(TipTextService* text_service,
+                                       ITfDocumentMgr* document_manager) {
   if (!text_service) {
-    return;
-  }
-
-  if (!text_service->IsLangbarInitialized()) {
-    // If language bar is not initialized, there is nothing to do here.
     return;
   }
 
@@ -87,7 +82,8 @@ void UpdateLanguageBarOnFocusChange(TipTextService* text_service,
   const CompositionMode mozc_mode =
       open ? input_mode_manager->GetEffectiveConversionMode()
            : commands::DIRECT;
-  text_service->UpdateLangbar(!disabled, static_cast<uint32_t>(mozc_mode));
+  text_service->UpdateSystemTrayIcon(!disabled,
+                                     static_cast<uint32_t>(mozc_mode));
 }
 
 bool UpdateInternal(TipTextService* text_service, ITfContext* context,
@@ -107,14 +103,14 @@ void TipUiHandler::OnDeactivate(TipTextService* text_service) {
 
 void TipUiHandler::OnDocumentMgrChanged(TipTextService* text_service,
                                         ITfDocumentMgr* document_manager) {
-  UpdateLanguageBarOnFocusChange(text_service, document_manager);
+  UpdateSystemTrayIconOnFocusChange(text_service, document_manager);
 }
 
 void TipUiHandler::OnFocusChange(TipTextService* text_service,
                                  ITfDocumentMgr* focused_document_manager) {
   TipUiHandlerConventional::OnFocusChange(text_service,
                                           focused_document_manager);
-  UpdateLanguageBarOnFocusChange(text_service, focused_document_manager);
+  UpdateSystemTrayIconOnFocusChange(text_service, focused_document_manager);
 }
 
 bool TipUiHandler::Update(TipTextService* text_service, ITfContext* context,
@@ -126,9 +122,9 @@ bool TipUiHandler::Update(TipTextService* text_service, ITfContext* context,
       input_mode_manager->GetEffectiveConversionMode();
   const bool result = UpdateInternal(text_service, context, read_cookie);
   if (open) {
-    text_service->UpdateLangbar(true, mozc_mode);
+    text_service->UpdateSystemTrayIcon(true, mozc_mode);
   } else {
-    text_service->UpdateLangbar(true, commands::DIRECT);
+    text_service->UpdateSystemTrayIcon(true, commands::DIRECT);
   }
   return result;
 }

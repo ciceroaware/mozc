@@ -31,7 +31,7 @@
 // Microsoft Visual C++ generated include file.
 // Used by TextService_template.rc
 //
-#define IDS_WIN8_TRAY_ITEM 105
+#define IDS_SYSTEM_TRAY_ICON 105
 #define IDS_DIRECT 106
 #define IDS_HIRAGANA 107
 #define IDS_PROPERTY 109

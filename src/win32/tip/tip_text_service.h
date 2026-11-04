@@ -73,12 +73,9 @@ class TipTextService : public IUnknown {
   virtual wil::com_ptr_nothrow<ITfCompositionSink> CreateCompositionSink(
       ITfContext* context) = 0;
 
-  // Updates the language bar as needed.  Does nothing if the language bar is
-  // not available.
-  virtual void UpdateLangbar(bool enabled, uint32_t mozc_mode) = 0;
-
-  // Returns true if the language bar is initialized.
-  virtual bool IsLangbarInitialized() const = 0;
+  // Updates the IME mode icon in the system tray as needed. Does nothing if
+  // the icon is not available.
+  virtual void UpdateSystemTrayIcon(bool enabled, uint32_t mozc_mode) = 0;
 
   virtual ~TipTextService() = default;
 };
