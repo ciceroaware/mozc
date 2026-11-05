@@ -163,7 +163,7 @@ class Louds {
   }
 
  private:
-  SimpleSuccinctBitVectorIndex index_;
+  SimpleSuccinctBitVectorIndex<32> index_;
   size_t select0_cache_size_ = 0;
   size_t select1_cache_size_ = 0;
   std::unique_ptr<int[]> select_cache_;

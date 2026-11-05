@@ -34,6 +34,8 @@
 #include <ostream>
 #include <string>
 #include <tuple>
+#include <utility>
+#include <variant>
 
 #include "absl/strings/str_cat.h"
 #include "testing/gunit.h"
@@ -41,6 +43,66 @@
 namespace {
 
 using ::mozc::storage::louds::SimpleSuccinctBitVectorIndex;
+using ::mozc::storage::louds::SimpleSuccinctBitVectorIndexChunkSizes;
+
+// SimpleSuccinctBitVectorIndex with the chunk size given at run time, so that
+// the chunk size can be a test parameter.
+template <typename ChunkSizes>
+class AnyChunkSizeBitVectorIndex;
+
+template <int... kChunkSizes>
+class AnyChunkSizeBitVectorIndex<std::integer_sequence<int, kChunkSizes...>> {
+ public:
+  static constexpr int kChunkSizesArray[] = {kChunkSizes...};
+
+  explicit AnyChunkSizeBitVectorIndex(int chunk_size) {
+    const bool supported =
+        ((chunk_size == kChunkSizes &&
+          (index_.template emplace<SimpleSuccinctBitVectorIndex<kChunkSizes>>(),
+           true)) ||
+         ...);
+    EXPECT_TRUE(supported) << chunk_size;
+  }
+
+  void Init(const uint8_t *data, int length, size_t lb0_cache_size,
+            size_t lb1_cache_size) {
+    std::visit(
+        [&](auto &index) {
+          index.Init(data, length, lb0_cache_size, lb1_cache_size);
+        },
+        index_);
+  }
+  int Rank0(int n) const {
+    return std::visit([n](const auto &index) { return index.Rank0(n); },
+                      index_);
+  }
+  int Rank1(int n) const {
+    return std::visit([n](const auto &index) { return index.Rank1(n); },
+                      index_);
+  }
+  int Select0(int n) const {
+    return std::visit([n](const auto &index) { return index.Select0(n); },
+                      index_);
+  }
+  int Select1(int n) const {
+    return std::visit([n](const auto &index) { return index.Select1(n); },
+                      index_);
+  }
+  int GetNum0Bits() const {
+    return std::visit([](const auto &index) { return index.GetNum0Bits(); },
+                      index_);
+  }
+  int GetNum1Bits() const {
+    return std::visit([](const auto &index) { return index.GetNum1Bits(); },
+                      index_);
+  }
+
+ private:
+  std::variant<SimpleSuccinctBitVectorIndex<kChunkSizes>...> index_;
+};
+
+using TestBitVectorIndex =
+    AnyChunkSizeBitVectorIndex<SimpleSuccinctBitVectorIndexChunkSizes>;
 
 // The sizes of the lower bound caches for Select0 and Select1.
 struct CacheSizes {
@@ -60,11 +122,11 @@ class SimpleSuccinctBitVectorIndexTest
 
 INSTANTIATE_TEST_SUITE_P(
     ChunkAndCacheSizes, SimpleSuccinctBitVectorIndexTest,
-    ::testing::Combine(::testing::Values(8, 16, 32, 64),
-                       ::testing::Values(CacheSizes{0, 0}, CacheSizes{0, 1},
-                                         CacheSizes{1, 0}, CacheSizes{1, 1},
-                                         CacheSizes{2, 2}, CacheSizes{8, 8},
-                                         CacheSizes{1024, 1024})),
+    ::testing::Combine(
+        ::testing::ValuesIn(TestBitVectorIndex::kChunkSizesArray),
+        ::testing::Values(CacheSizes{0, 0}, CacheSizes{0, 1}, CacheSizes{1, 0},
+                          CacheSizes{1, 1}, CacheSizes{2, 2}, CacheSizes{8, 8},
+                          CacheSizes{1024, 1024})),
     [](const ::testing::TestParamInfo<TestParam> &info) {
       const CacheSizes &cache_sizes = std::get<1>(info.param);
       return absl::StrCat("Chunk", std::get<0>(info.param), "_Lb0Cache",
@@ -75,7 +137,7 @@ TEST_P(SimpleSuccinctBitVectorIndexTest, Rank) {
   const auto &[chunk_size, cache_sizes] = GetParam();
 
   static constexpr char kData[] = "\x00\x00\xFF\xFF\x00\x00\xFF\xFF";
-  SimpleSuccinctBitVectorIndex bit_vector(chunk_size);
+  TestBitVectorIndex bit_vector(chunk_size);
 
   bit_vector.Init(reinterpret_cast<const uint8_t *>(kData), 8,
                   cache_sizes.lb0, cache_sizes.lb1);
@@ -109,7 +171,7 @@ TEST_P(SimpleSuccinctBitVectorIndexTest, Select) {
   const auto &[chunk_size, cache_sizes] = GetParam();
 
   static constexpr char kData[] = "\x00\x00\xFF\xFF\x00\x00\xFF\xFF";
-  SimpleSuccinctBitVectorIndex bit_vector(chunk_size);
+  TestBitVectorIndex bit_vector(chunk_size);
 
   bit_vector.Init(reinterpret_cast<const uint8_t *>(kData), 8,
                   cache_sizes.lb0, cache_sizes.lb1);
@@ -136,7 +198,7 @@ TEST_P(SimpleSuccinctBitVectorIndexTest, Pattern1) {
   // Repeat the bit pattern '0b10101010'.
   const std::string data(1024, '\xAA');
 
-  SimpleSuccinctBitVectorIndex bit_vector(chunk_size);
+  TestBitVectorIndex bit_vector(chunk_size);
   bit_vector.Init(reinterpret_cast<const uint8_t *>(data.data()), data.length(),
                   cache_sizes.lb0, cache_sizes.lb1);
   EXPECT_EQ(bit_vector.GetNum0Bits(), 4 * 1024);
@@ -174,7 +236,7 @@ TEST_P(SimpleSuccinctBitVectorIndexTest, Pattern2) {
   // Repeat the bit pattern '0b11001100'.
   const std::string data(1024, '\xCC');
 
-  SimpleSuccinctBitVectorIndex bit_vector(chunk_size);
+  TestBitVectorIndex bit_vector(chunk_size);
   bit_vector.Init(reinterpret_cast<const uint8_t *>(data.data()), data.length(),
                   cache_sizes.lb0, cache_sizes.lb1);
   EXPECT_EQ(bit_vector.GetNum0Bits(), 4 * 1024);
@@ -231,7 +293,7 @@ TEST_P(SimpleSuccinctBitVectorIndexTest, NaiveScan) {
         c = static_cast<char>(byte);
       }
 
-      SimpleSuccinctBitVectorIndex bit_vector(chunk_size);
+      TestBitVectorIndex bit_vector(chunk_size);
       bit_vector.Init(reinterpret_cast<const uint8_t *>(data.data()), size,
                       cache_sizes.lb0, cache_sizes.lb1);
       int num_0bits = 0;

@@ -32,30 +32,45 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <utility>
 #include <vector>
 
 namespace mozc {
 namespace storage {
 namespace louds {
 
+// The chunk sizes in bytes for which SimpleSuccinctBitVectorIndex is
+// explicitly instantiated in the .cc file, and which are covered by its tests
+// and benchmarks. 32 is the one used in production; 8, 16 and 64 are kept so
+// that the tests and benchmarks can show the trade-off around it.
+using SimpleSuccinctBitVectorIndexChunkSizes =
+    std::integer_sequence<int, 8, 16, 32, 64>;
+
+namespace internal {
+
+template <int... kChunkSizes>
+constexpr bool IsSupportedChunkSize(
+    int chunk_size, std::integer_sequence<int, kChunkSizes...>) {
+  return ((chunk_size == kChunkSizes) || ...);
+}
+
+}  // namespace internal
+
 // This is simple(naive) C++ implementation of succinct bit vector.
+//
+// kChunkSize is in bytes, and must be one of
+// SimpleSuccinctBitVectorIndexChunkSizes.
+template <int kChunkSize>
 class SimpleSuccinctBitVectorIndex {
+  static_assert(internal::IsSupportedChunkSize(
+                    kChunkSize, SimpleSuccinctBitVectorIndexChunkSizes{}),
+                "kChunkSize must be one of "
+                "SimpleSuccinctBitVectorIndexChunkSizes");
+
  public:
-  // The default chunk_size is 32.
   SimpleSuccinctBitVectorIndex()
       : data_(nullptr),
         length_(0),
-        chunk_size_(32),
-        lb0_cache_increment_(1),
-        lb1_cache_increment_(1) {}
-
-  // chunk_size is in bytes, and must be greater than or equal to 4
-  // and power of 2, at the moment, although we may relax the restriction
-  // in future if necessary.
-  explicit SimpleSuccinctBitVectorIndex(int chunk_size)
-      : data_(nullptr),
-        length_(0),
-        chunk_size_(chunk_size),
         lb0_cache_increment_(1),
         lb1_cache_increment_(1) {}
 
@@ -105,7 +120,6 @@ class SimpleSuccinctBitVectorIndex {
   // The order of members is optimized to minimize the padding size.
   const uint8_t* data_;
   int length_;
-  int chunk_size_;
   std::vector<int> index_;
   std::vector<const int*> lb0_cache_;
   int lb0_cache_increment_;

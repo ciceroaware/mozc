@@ -55,7 +55,7 @@ class BitVectorBasedArray {
   const char *Get(size_t index, size_t *length) const;
 
  private:
-  SimpleSuccinctBitVectorIndex index_;
+  SimpleSuccinctBitVectorIndex<32> index_;
   size_t base_length_;
   size_t step_length_;
   const char *data_;

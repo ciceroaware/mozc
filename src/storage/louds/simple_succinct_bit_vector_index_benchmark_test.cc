@@ -29,8 +29,11 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <utility>
 #include <vector>
 
+#include "absl/strings/str_cat.h"
+#include "absl/strings/string_view.h"
 #include "storage/louds/simple_succinct_bit_vector_index.h"
 #include "testing/benchmark.h"
 
@@ -105,10 +108,11 @@ constexpr size_t kNumQueries = 1024;
 // The same cache size as the ones used by the system dictionary.
 constexpr size_t kLbCacheSize = 1024;
 
+template <int kChunkSize>
 void BM_Rank1(benchmark::State& state, DataShape shape) {
   const int data_size = static_cast<int>(state.range(0));
   const std::vector<uint8_t> data = GenerateData(data_size, shape);
-  SimpleSuccinctBitVectorIndex index;
+  SimpleSuccinctBitVectorIndex<kChunkSize> index;
   index.Init(data.data(), data_size, kLbCacheSize, kLbCacheSize);
   const uint32_t range = static_cast<uint32_t>(data_size) * 8 + 1;
   Lcg lcg(42);
@@ -122,10 +126,11 @@ void BM_Rank1(benchmark::State& state, DataShape shape) {
   state.SetItemsProcessed(state.iterations() * kNumQueries);
 }
 
+template <int kChunkSize>
 void BM_Select0(benchmark::State& state, DataShape shape) {
   const int data_size = static_cast<int>(state.range(0));
   const std::vector<uint8_t> data = GenerateData(data_size, shape);
-  SimpleSuccinctBitVectorIndex index;
+  SimpleSuccinctBitVectorIndex<kChunkSize> index;
   index.Init(data.data(), data_size, kLbCacheSize, kLbCacheSize);
   const uint32_t range = static_cast<uint32_t>(index.GetNum0Bits());
   Lcg lcg(42);
@@ -139,10 +144,11 @@ void BM_Select0(benchmark::State& state, DataShape shape) {
   state.SetItemsProcessed(state.iterations() * kNumQueries);
 }
 
+template <int kChunkSize>
 void BM_Select1(benchmark::State& state, DataShape shape) {
   const int data_size = static_cast<int>(state.range(0));
   const std::vector<uint8_t> data = GenerateData(data_size, shape);
-  SimpleSuccinctBitVectorIndex index;
+  SimpleSuccinctBitVectorIndex<kChunkSize> index;
   index.Init(data.data(), data_size, kLbCacheSize, kLbCacheSize);
   const uint32_t range = static_cast<uint32_t>(index.GetNum1Bits());
   Lcg lcg(42);
@@ -160,22 +166,50 @@ void BM_Select1(benchmark::State& state, DataShape shape) {
 // KiB is the scale of the bit vectors in the OSS system dictionary (250-700
 // KiB), 2 MiB leaves headroom for larger dictionaries, and 4 MiB does not fit
 // in the L2 cache of many CPUs.
-#define MOZC_LOUDS_BENCHMARK_SIZES \
-  ->Arg(64 << 10)->Arg(512 << 10)->Arg(2 << 20)->Arg(4 << 20)
+void Register(absl::string_view name, int chunk_size, absl::string_view label,
+              void (*func)(benchmark::State&, DataShape), DataShape shape) {
+  benchmark::RegisterBenchmark(absl::StrCat(name, "<", chunk_size, ">/", label),
+                               func, shape)
+      ->Arg(64 << 10)
+      ->Arg(512 << 10)
+      ->Arg(2 << 20)
+      ->Arg(4 << 20);
+}
 
-BENCHMARK_CAPTURE(BM_Rank1, Uniform, kUniform) MOZC_LOUDS_BENCHMARK_SIZES;
-BENCHMARK_CAPTURE(BM_Rank1, Louds, kLouds) MOZC_LOUDS_BENCHMARK_SIZES;
+// Registers the benchmarks for every chunk size in
+// SimpleSuccinctBitVectorIndexChunkSizes.
+template <int... kChunkSizes>
+bool RegisterAll(std::integer_sequence<int, kChunkSizes...>) {
+  (Register("BM_Rank1", kChunkSizes, "Uniform", BM_Rank1<kChunkSizes>,
+            kUniform),
+   ...);
+  (Register("BM_Rank1", kChunkSizes, "Louds", BM_Rank1<kChunkSizes>, kLouds),
+   ...);
 
-BENCHMARK_CAPTURE(BM_Select0, Uniform, kUniform) MOZC_LOUDS_BENCHMARK_SIZES;
-BENCHMARK_CAPTURE(BM_Select0, Louds, kLouds) MOZC_LOUDS_BENCHMARK_SIZES;
-BENCHMARK_CAPTURE(BM_Select0, TokenIndex, kTokenIndex)
-MOZC_LOUDS_BENCHMARK_SIZES;
+  (Register("BM_Select0", kChunkSizes, "Uniform", BM_Select0<kChunkSizes>,
+            kUniform),
+   ...);
+  (Register("BM_Select0", kChunkSizes, "Louds", BM_Select0<kChunkSizes>,
+            kLouds),
+   ...);
+  (Register("BM_Select0", kChunkSizes, "TokenIndex", BM_Select0<kChunkSizes>,
+            kTokenIndex),
+   ...);
 
-BENCHMARK_CAPTURE(BM_Select1, Uniform, kUniform) MOZC_LOUDS_BENCHMARK_SIZES;
-BENCHMARK_CAPTURE(BM_Select1, Louds, kLouds) MOZC_LOUDS_BENCHMARK_SIZES;
-BENCHMARK_CAPTURE(BM_Select1, Terminal, kTerminal) MOZC_LOUDS_BENCHMARK_SIZES;
+  (Register("BM_Select1", kChunkSizes, "Uniform", BM_Select1<kChunkSizes>,
+            kUniform),
+   ...);
+  (Register("BM_Select1", kChunkSizes, "Louds", BM_Select1<kChunkSizes>,
+            kLouds),
+   ...);
+  (Register("BM_Select1", kChunkSizes, "Terminal", BM_Select1<kChunkSizes>,
+            kTerminal),
+   ...);
+  return true;
+}
 
-#undef MOZC_LOUDS_BENCHMARK_SIZES
+[[maybe_unused]] const bool kRegistered =
+    RegisterAll(SimpleSuccinctBitVectorIndexChunkSizes{});
 
 }  // namespace
 }  // namespace louds
