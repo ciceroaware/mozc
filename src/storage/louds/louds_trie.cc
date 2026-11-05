@@ -31,7 +31,10 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <string>
 
+#include "absl/base/attributes.h"
+#include "absl/base/optimization.h"
 #include "absl/log/check.h"
 #include "absl/strings/string_view.h"
 #include "base/bits.h"
@@ -125,17 +128,35 @@ int LoudsTrie::ExactSearch(absl::string_view key) const {
   return -1;
 }
 
-absl::string_view LoudsTrie::RestoreKeyString(Node node, char *buf) const {
+absl::string_view LoudsTrie::RestoreKeyString(Node node, KeyBuffer &buf) const {
+  char *const buf_begin = buf.buf_.data();
   // Ensure the returned string view is null-terminated.
-  char *const buf_end = buf + kMaxDepth;
+  char *const buf_end = buf_begin + buf.buf_.size() - 1;
   *buf_end = '\0';
 
   // Climb up the trie to the root and fill |buf| backward.
   char *ptr = buf_end;
   for (; !louds_.IsRoot(node); louds_.MoveToParent(&node)) {
+    if (ABSL_PREDICT_FALSE(ptr == buf_begin)) {
+      return RestoreLongKeyString(node, buf);
+    }
     *--ptr = GetEdgeLabelToParentNode(node);
   }
   return absl::string_view(ptr, buf_end - ptr);
+}
+
+ABSL_ATTRIBUTE_NOINLINE absl::string_view LoudsTrie::RestoreLongKeyString(
+    Node node, KeyBuffer &buf) const {
+  // |buf| is already filled with the suffix of the key and the null
+  // terminator.  Collect the remaining prefix in reverse order, then prepend it
+  // to |buf|.
+  std::string reversed_prefix;
+  for (; !louds_.IsRoot(node); louds_.MoveToParent(&node)) {
+    reversed_prefix.push_back(GetEdgeLabelToParentNode(node));
+  }
+  buf.buf_.insert(buf.buf_.begin(), reversed_prefix.rbegin(),
+                  reversed_prefix.rend());
+  return absl::string_view(buf.buf_.data(), buf.buf_.size() - 1);
 }
 
 }  // namespace louds

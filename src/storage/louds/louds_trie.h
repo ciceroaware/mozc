@@ -32,7 +32,11 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <memory>
+#include <new>
+#include <utility>
 
+#include "absl/container/inlined_vector.h"
 #include "absl/strings/string_view.h"
 #include "storage/louds/louds.h"
 #include "storage/louds/simple_succinct_bit_vector_index.h"
@@ -40,14 +44,70 @@
 namespace mozc {
 namespace storage {
 namespace louds {
+namespace internal {
+
+// An allocator that default-initializes (rather than value-initializes)
+// elements, so that resizing a container of trivial types does not zero-fill.
+template <typename T>
+class DefaultInitAllocator {
+ public:
+  using value_type = T;
+
+  DefaultInitAllocator() = default;
+  template <typename U>
+  constexpr DefaultInitAllocator(const DefaultInitAllocator<U>&) noexcept {}
+
+  T* allocate(size_t n) { return std::allocator<T>().allocate(n); }
+  void deallocate(T* p, size_t n) { std::allocator<T>().deallocate(p, n); }
+
+  template <typename U>
+  void construct(U* p) {
+    ::new (static_cast<void*>(p)) U;
+  }
+  template <typename U, typename... Args>
+  void construct(U* p, Args&&... args) {
+    ::new (static_cast<void*>(p)) U(std::forward<Args>(args)...);
+  }
+
+  friend bool operator==(const DefaultInitAllocator&,
+                         const DefaultInitAllocator&) {
+    return true;
+  }
+  friend bool operator!=(const DefaultInitAllocator&,
+                         const DefaultInitAllocator&) {
+    return false;
+  }
+};
+
+}  // namespace internal
 
 class LoudsTrie {
  public:
-  // The max depth of the trie.
-  static constexpr size_t kMaxDepth = 256;
-
   // This class stores a traversal state.
   typedef Louds::Node Node;
+
+  // A reusable buffer for RestoreKeyString().  It can hold a key of up to
+  // kInlineCapacity bytes without heap allocation.  When a longer key is
+  // restored, the buffer grows and keeps the grown capacity for subsequent
+  // calls.
+  class KeyBuffer {
+   public:
+    // This is just a hint for performance.  There is no limit on the length of
+    // keys that RestoreKeyString() can restore.
+    static constexpr size_t kInlineCapacity = 256;
+
+    // The inline storage is intentionally left uninitialized.
+    KeyBuffer() : buf_(kInlineCapacity + 1) {}
+
+   private:
+    friend class LoudsTrie;
+    // RestoreKeyString() puts the null terminator at the last byte of buf_ and
+    // fills the rest backward, so buf_.size() - 1 is the maximum length of a
+    // key that can be restored without growing it.
+    absl::InlinedVector<char, kInlineCapacity + 1,
+                        internal::DefaultInitAllocator<char>>
+        buf_;
+  };
 
   LoudsTrie() = default;
 
@@ -109,19 +169,15 @@ class LoudsTrie {
     return node;
   }
 
-  // Restores the key string that reaches to |node|.  The caller is
-  // responsible for allocating a buffer for the result string view, which needs
-  // to be passed in |buf|.  The returned string view points to a piece of
-  // |buf|.
-  // REQUIRES: |buf| is longer than kMaxDepth + 1.
-  absl::string_view RestoreKeyString(Node node, char* buf) const;
+  // Restores the key string that reaches to |node|.  The returned string view
+  // points to a piece of |buf|, and is invalidated by the next call with the
+  // same |buf|.  The returned string view is null-terminated.
+  absl::string_view RestoreKeyString(Node node, KeyBuffer& buf) const;
 
-  // Restores the key string corresponding to |key_id|.  The caller is
-  // responsible for allocating a buffer for the result string view, which needs
-  // to be passed in |buf|.  The returned string view points to a piece of
-  // |buf|.
-  // REQUIRES: |buf| is longer than kMaxDepth + 1.
-  absl::string_view RestoreKeyString(int key_id, char* buf) const {
+  // Restores the key string corresponding to |key_id|.  The returned string
+  // view points to a piece of |buf|, and is invalidated by the next call with
+  // the same |buf|.  The returned string view is null-terminated.
+  absl::string_view RestoreKeyString(int key_id, KeyBuffer& buf) const {
     // TODO(noriyukit): Check if it's necessary to handle negative IDs.
     return key_id < 0 ? absl::string_view()
                       : RestoreKeyString(GetTerminalNodeFromKeyId(key_id), buf);
@@ -190,6 +246,10 @@ class LoudsTrie {
   }
 
  private:
+  // Slow path of RestoreKeyString() for keys longer than |buf|.  |node| is the
+  // node at which |buf| became full.
+  absl::string_view RestoreLongKeyString(Node node, KeyBuffer& buf) const;
+
   Louds louds_;  // Tree structure representation by LOUDS.
 
   // Bit-vector to represent whether each node in LOUDS tree is terminal.

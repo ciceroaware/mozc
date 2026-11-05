@@ -94,6 +94,10 @@ namespace {
 
 constexpr int kMinTokenArrayBlobSize = 4;
 
+// LookupPrefixWithKeyExpansionImpl() recurses once per character of the encoded
+// key, so the length of the key is limited to bound the stack usage.
+constexpr size_t kMaxEncodedKeyLengthForKeyExpansion = 256;
+
 // TODO(noriyukit): The following parameters may not be well optimized.  In our
 // experiments, Select1 is computational burden, so increasing cache size for
 // lb1/select1 may improve performance.
@@ -613,9 +617,6 @@ void SystemDictionary::LookupPredictive(absl::string_view key,
   }
 
   const std::string encoded_key = codec_->EncodeKey(key);
-  if (encoded_key.size() > LoudsTrie::kMaxDepth) {
-    return;
-  }
 
   const KeyExpansionTable& table =
       callback->IsKanaModifierInsensitiveConversion()
@@ -632,7 +633,7 @@ void SystemDictionary::LookupPredictive(absl::string_view key,
   CollectPredictiveNodesInBfsOrder(encoded_key, table, kLookupLimit, &result);
 
   // Reused buffer and instances inside the following loop.
-  char encoded_actual_key_buffer[LoudsTrie::kMaxDepth + 1];
+  LoudsTrie::KeyBuffer encoded_actual_key_buffer;
   std::string decoded_key, actual_key_str;
   decoded_key.reserve(key.size() * 2);
   actual_key_str.reserve(key.size() * 2);
@@ -921,7 +922,12 @@ void SystemDictionary::LookupPrefix(absl::string_view key,
     return;
   }
 
-  char actual_key_buffer[LoudsTrie::kMaxDepth + 1];
+  if (encoded_key.size() > kMaxEncodedKeyLengthForKeyExpansion) {
+    return;
+  }
+  // LookupPrefixWithKeyExpansionImpl() writes at most encoded_key.size()
+  // characters to actual_key_buffer.
+  char actual_key_buffer[kMaxEncodedKeyLengthForKeyExpansion];
   std::string actual_prefix;
   actual_prefix.reserve(key.size() * 3);
   LookupPrefixWithKeyExpansionImpl(
@@ -1012,7 +1018,7 @@ void SystemDictionary::RegisterReverseLookupTokensForT13N(
   const std::string hiragana_value = japanese_util::KatakanaToHiragana(value);
   const std::string encoded_key = codec_->EncodeKey(hiragana_value);
   std::string prev_value;
-  prev_value.reserve(LoudsTrie::kMaxDepth * 3);
+  prev_value.reserve(LoudsTrie::KeyBuffer::kInlineCapacity * 3);
   RunCallbackOnEachPrefix(
       key_trie_, value_trie_, token_array_, *codec_, frequent_pos_,
       hiragana_value, encoded_key, callback, [&](const TokenInfo& token_info) {
@@ -1077,7 +1083,7 @@ void SystemDictionary::RegisterReverseLookupResults(
     const absl::btree_set<int>& id_set, const ReverseLookupCache& cache,
     Callback* callback) const {
   const uint8_t* encoded_tokens_ptr = GetTokenArrayPtr(token_array_, 0);
-  char buffer[LoudsTrie::kMaxDepth + 1];
+  LoudsTrie::KeyBuffer buffer;
   for (const int value_id : id_set) {
     const auto range = cache.results.equal_range(value_id);
     for (auto result_itr = range.first; result_itr != range.second;

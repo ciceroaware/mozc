@@ -71,7 +71,7 @@ class TokenDecodeIterator {
   void NextInternal();
 
   std::string LookupValue(int id) const {
-    char buffer[storage::louds::LoudsTrie::kMaxDepth + 1];
+    storage::louds::LoudsTrie::KeyBuffer buffer;
     const absl::string_view encoded_value =
         value_trie_.RestoreKeyString(id, buffer);
     return codec_.DecodeValue(encoded_value);

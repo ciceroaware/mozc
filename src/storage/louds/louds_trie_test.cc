@@ -31,6 +31,8 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <string>
+#include <utility>
 #include <vector>
 
 #include "absl/strings/string_view.h"
@@ -142,7 +144,7 @@ TEST_P(LoudsTrieTest, NodeBasedApis) {
             param.louds_select0_cache_size, param.louds_select1_cache_size,
             param.termvec_lb1_cache_size);
 
-  char buf[LoudsTrie::kMaxDepth + 1];  // for RestoreKeyString().
+  LoudsTrie::KeyBuffer buf;  // for RestoreKeyString().
 
   // Walk the trie in BFS order and check properties at each node.
 
@@ -513,7 +515,7 @@ TEST_P(LoudsTrieTest, RestoreKeyString) {
             param.louds_select0_cache_size, param.louds_select1_cache_size,
             param.termvec_lb1_cache_size);
 
-  char buffer[LoudsTrie::kMaxDepth + 1];
+  LoudsTrie::KeyBuffer buffer;
   EXPECT_EQ(trie.RestoreKeyString(builder.GetId("aa"), buffer), "aa");
   EXPECT_EQ(trie.RestoreKeyString(builder.GetId("ab"), buffer), "ab");
   EXPECT_EQ(trie.RestoreKeyString(builder.GetId("abc"), buffer), "abc");
@@ -528,6 +530,67 @@ TEST_P(LoudsTrieTest, RestoreKeyString) {
   trie.Close();
 }
 INSTANTIATE_TEST_CASE(GenRestoreKeyStringTest);
+
+TEST_P(LoudsTrieTest, RestoreLongKeyString) {
+  // Keys around and beyond the inline capacity of LoudsTrie::KeyBuffer.
+  std::vector<std::string> keys;
+  for (const size_t len :
+       {size_t{1}, LoudsTrie::KeyBuffer::kInlineCapacity - 1,
+        LoudsTrie::KeyBuffer::kInlineCapacity,
+        LoudsTrie::KeyBuffer::kInlineCapacity + 1, size_t{1000},
+        size_t{3000}}) {
+    std::string key(len, 'a');
+    // Make each byte depend on its position so that a misplaced byte is
+    // detected.
+    for (size_t i = 0; i < len; ++i) {
+      key[i] = static_cast<char>('a' + i % 26);
+    }
+    keys.push_back(key);
+    // Also add a key that shares the prefix but differs at the end.
+    key.back() = 'Z';
+    keys.push_back(std::move(key));
+  }
+
+  LoudsTrieBuilder builder;
+  for (const std::string &key : keys) {
+    builder.Add(key);
+  }
+  builder.Build();
+
+  const CacheSizeParam &param = GetParam();
+  LoudsTrie trie;
+  trie.Open(reinterpret_cast<const uint8_t *>(builder.image().data()),
+            param.louds_lb0_cache_size, param.louds_lb1_cache_size,
+            param.louds_select0_cache_size, param.louds_select1_cache_size,
+            param.termvec_lb1_cache_size);
+
+  // Restores |key| and checks that the result is also null-terminated.
+  auto expect_restored = [&](const std::string &key,
+                             LoudsTrie::KeyBuffer &buffer) {
+    const absl::string_view restored =
+        trie.RestoreKeyString(builder.GetId(key), buffer);
+    EXPECT_EQ(restored, key);
+    EXPECT_EQ(restored.data()[restored.size()], '\0') << key.size();
+  };
+
+  // Use a fresh buffer for each key.
+  for (const std::string &key : keys) {
+    LoudsTrie::KeyBuffer buffer;
+    expect_restored(key, buffer);
+  }
+
+  // Reuse a buffer across short and long keys in both orders, so that the
+  // buffer grown by a long key is used for subsequent short and long keys.
+  LoudsTrie::KeyBuffer buffer;
+  for (auto it = keys.begin(); it != keys.end(); ++it) {
+    expect_restored(*it, buffer);
+  }
+  for (auto it = keys.rbegin(); it != keys.rend(); ++it) {
+    expect_restored(*it, buffer);
+  }
+  trie.Close();
+}
+INSTANTIATE_TEST_CASE(GenRestoreLongKeyStringTest);
 
 }  // namespace
 }  // namespace louds

@@ -940,6 +940,106 @@ TEST_F(SystemDictionaryTest, ShouldNotUseSmallCostEncodingForHeteronyms) {
   }
 }
 
+TEST_F(SystemDictionaryTest, LongKeyAndValue) {
+  // Both the key and the value are longer than
+  // LoudsTrie::KeyBuffer::kInlineCapacity bytes after encoding, so that
+  // LoudsTrie::RestoreKeyString() takes its slow path.
+  std::string long_key;
+  for (int i = 0; i < 1000; ++i) {
+    absl::StrAppend(&long_key, "あいう");
+  }
+  std::string long_value;
+  for (int i = 0; i < 1000; ++i) {
+    absl::StrAppend(&long_value, "<a>漢字");
+  }
+  std::vector<Token> tokens = {
+      {"はろー", long_value, 100, 1, 1, Token::NONE},
+      {"はろー", "ハロー", 100, 1, 1, Token::NONE},
+      {long_key, "長いキー", 100, 1, 1, Token::NONE},
+      {"はる", "春", 100, 1, 1, Token::NONE},
+  };
+  std::unique_ptr<SystemDictionary> system_dic =
+      BuildSystemDictionary(MakeTokenPointers(&tokens));
+  ASSERT_TRUE(system_dic);
+
+  auto contains = [](const CollectTokenCallback& callback,
+                     absl::string_view key, absl::string_view value) {
+    for (const Token& token : callback.tokens()) {
+      if (token.key == key && token.value == value) {
+        return true;
+      }
+    }
+    return false;
+  };
+
+  {
+    CollectTokenCallback callback;
+    system_dic->LookupExact("はろー", &callback);
+    EXPECT_TRUE(contains(callback, "はろー", long_value));
+    EXPECT_TRUE(contains(callback, "はろー", "ハロー"));
+  }
+  {
+    CollectTokenCallback callback;
+    system_dic->LookupExact(long_key, &callback);
+    EXPECT_TRUE(contains(callback, long_key, "長いキー"));
+  }
+  {
+    CollectTokenCallback callback;
+    system_dic->LookupPrefix(absl::StrCat(long_key, "え"), &callback);
+    EXPECT_TRUE(contains(callback, long_key, "長いキー"));
+  }
+  {
+    CollectTokenCallback callback;
+    callback.SetKanaModifierInsensitiveConversion(true);
+    system_dic->LookupPrefix("はろーえ", &callback);
+    EXPECT_TRUE(contains(callback, "はろー", long_value));
+  }
+  {
+    // Kana modifier insensitive prefix lookup ignores too long keys.
+    CollectTokenCallback callback;
+    callback.SetKanaModifierInsensitiveConversion(true);
+    system_dic->LookupPrefix(absl::StrCat(long_key, "え"), &callback);
+    EXPECT_TRUE(callback.tokens().empty());
+  }
+  {
+    CollectTokenCallback callback;
+    system_dic->LookupPredictive("は", &callback);
+    EXPECT_TRUE(contains(callback, "はろー", long_value));
+    EXPECT_TRUE(contains(callback, "はる", "春"));
+  }
+  {
+    CollectTokenCallback callback;
+    system_dic->LookupPredictive("あいう", &callback);
+    EXPECT_TRUE(contains(callback, long_key, "長いキー"));
+  }
+  {
+    // The query itself is also longer than
+    // LoudsTrie::KeyBuffer::kInlineCapacity bytes after encoding.
+    std::string long_query;
+    for (int i = 0; i < 200; ++i) {
+      absl::StrAppend(&long_query, "あいう");
+    }
+    for (const bool kana_modifier_insensitive : {false, true}) {
+      CollectTokenCallback callback;
+      callback.SetKanaModifierInsensitiveConversion(kana_modifier_insensitive);
+      system_dic->LookupPredictive(long_query, &callback);
+      EXPECT_TRUE(contains(callback, long_key, "長いキー"))
+          << kana_modifier_insensitive;
+    }
+  }
+  {
+    // Note that the key and the value of the results are swapped.
+    CollectTokenCallback callback;
+    system_dic->LookupReverse(long_value, &callback);
+    EXPECT_TRUE(contains(callback, long_value, "はろー"));
+  }
+  {
+    CollectTokenCallback callback;
+    system_dic->LookupReverse("長いキー", &callback);
+    EXPECT_TRUE(contains(callback, "長いキー", long_key));
+  }
+}
+
 }  // namespace
 }  // namespace dictionary
 }  // namespace mozc

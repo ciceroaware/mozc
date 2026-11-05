@@ -82,8 +82,9 @@ inline bool IsValidKey(absl::string_view key) {
 inline DictionaryInterface::Callback::ResultType HandleTerminalNode(
     const LoudsTrie& value_trie, const SystemDictionaryCodec& codec,
     const uint16_t suggestion_only_word_id, const LoudsTrie::Node& node,
-    DictionaryInterface::Callback* callback, char* encoded_value_buffer,
-    std::string* value, Token* token) {
+    DictionaryInterface::Callback* callback,
+    LoudsTrie::KeyBuffer& encoded_value_buffer, std::string* value,
+    Token* token) {
   const absl::string_view encoded_value =
       value_trie.RestoreKeyString(node, encoded_value_buffer);
 
@@ -113,7 +114,7 @@ void ValueDictionary::LookupPredictive(absl::string_view key,
     return;
   }
 
-  char encoded_value_buffer[LoudsTrie::kMaxDepth + 1];
+  LoudsTrie::KeyBuffer encoded_value_buffer;
   std::string value;
   value.reserve(key.size() * 2);
   Token token;
