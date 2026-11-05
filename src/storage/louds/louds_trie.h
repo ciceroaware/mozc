@@ -198,7 +198,7 @@ class LoudsTrie {
   // id=10 in louds_ corresponds to id=9 in terminal_bit_vector_, and so on.
   // TODO(noriyukit): Simplify the id-mapping by introducing a bit for the
   // super root in this bit vector.
-  SimpleSuccinctBitVectorIndex terminal_bit_vector_;
+  SimpleSuccinctBitVectorIndex<32> terminal_bit_vector_;
 
   // A sequence of characters, annotated to each edge.
   // This array also doesn't have an entry for super root.
