@@ -213,6 +213,13 @@ cc_library(
         ":dev_channel": ["CHANNEL_DEV=1"],
         "//conditions:default": [],
     }),
+    # EXPERIMENTAL: ATL used to be implicitly available through the INCLUDE
+    # and LIB of the locally installed toolchain. Do the same for hermetic-llvm
+    # for now.
+    deps = select({
+        "@platforms//os:windows": ["@atl"],
+        "//conditions:default": [],
+    }),
 )
 
 exports_files(

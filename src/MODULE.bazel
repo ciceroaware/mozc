@@ -265,6 +265,15 @@ windows_sdk_repository(
     name = "windows_sdk",
 )
 
+# ATL
+# EXPERIMENTAL: hermetic-llvm does not provide ATL. Borrow it from the local
+# Visual Studio for now.
+atl_repository = use_repo_rule("@//bazel:atl_repository.bzl", "atl_repository")
+
+atl_repository(
+    name = "atl",
+)
+
 # dotnet tool repository (to load "wix")
 dotnet_tool_repository = use_repo_rule(
     "@//bazel:dotnet_tool_repository.bzl",
