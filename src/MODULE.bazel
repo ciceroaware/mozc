@@ -148,6 +148,15 @@ use_repo(cc_configure, "local_config_cc")
 
 register_toolchains("@local_config_cc//:all")
 
+# hermetic-llvm: 0.8.27 2026-11-13
+# https://github.com/hermeticbuild/hermetic-llvm
+# EXPERIMENTAL: Hermetic clang-cl/lld-link toolchain for Windows (x64/arm64).
+# Toolchains are not registered here. See "windows_env" in .bazelrc.
+bazel_dep(
+    name = "llvm",
+    version = "0.8.27",
+)
+
 # rules_go: 0.60.0 2026-02-09
 # https://github.com/bazel-contrib/rules_go
 # This is not a direct dependency of mozc, but is added to override the

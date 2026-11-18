@@ -34,8 +34,14 @@ build:release_build --compilation_mode=opt
 build:release_build --copt=-DABSL_MIN_LOG_LEVEL=100
 
 ## Clang-cl toolchain for Windows
-build:windows_env --extra_toolchains=@local_config_cc//:cc-toolchain-arm64_windows-clang-cl
-build:windows_env --extra_toolchains=@local_config_cc//:cc-toolchain-x64_windows-clang-cl
+# EXPERIMENTAL: x64 and arm64 targets are built with hermetic-llvm. x86 (32-bit)
+# targets still need the locally installed clang-cl as hermetic-llvm does not
+# support it.
+# hermetic-llvm downloads the MSVC runtime and the Windows SDK from Microsoft.
+# The following options are required to declare that you accept their licenses.
+#   --repo_env=BAZEL_MSVC_RUNTIME_VISUAL_STUDIO_EULA=1
+#   --repo_env=BAZEL_WINDOWS_SDK_EULA=1
+build:windows_env --extra_toolchains=@llvm//toolchain:all
 build:windows_env --extra_toolchains=@local_config_cc//:cc-toolchain-x64_x86_windows-clang-cl
 build:windows_env --host_platform=//:host-windows-clang-cl
 build:windows_env --repo_env=BAZEL_WIN32_WINNT=/D_WIN32_WINNT=0x0A00
