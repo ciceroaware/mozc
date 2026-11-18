@@ -1,8 +1,8 @@
 --- cc/private/toolchain/windows_cc_configure.bzl
 +++ cc/private/toolchain/windows_cc_configure.bzl
-@@ -924,11 +924,13 @@ def configure_windows_toolchain(repository_ctx):
-
-     template_vars = dict()
+@@ -955,11 +955,13 @@
+     # are labelled the same as the working ones.
+     template_vars["%{compiler}"] = "clang-cl" if _use_clang_cl(repository_ctx) else "msvc-cl"
      msvc_vars_x64 = _get_msvc_vars(repository_ctx, paths, "x64")
 +    msvc_vars_x86 = _get_msvc_vars(repository_ctx, paths, "x86", msvc_vars_x64)
      template_vars.update(msvc_vars_x64)
