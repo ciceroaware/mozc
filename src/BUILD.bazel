@@ -56,7 +56,6 @@ config_setting(
     values = {
         "compilation_mode": "opt",
     },
-    visibility = ["//visibility:private"],
 )
 
 # CHANNEL=dev is used to build Dev channel binaries.

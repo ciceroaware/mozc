@@ -450,6 +450,15 @@ def mozc_win32_cc_prod_binary(
             "@platforms//cpu:x86_32": ["/CETCOMPAT"],
             "@platforms//cpu:x86_64": ["/CETCOMPAT"],
             "//conditions:default": [],
+        }) + select({
+            # '/DEBUG' implicitly disables '/OPT:REF' and '/OPT:ICF'. Unlike
+            # the toolchain configured by rules_cc, hermetic-llvm does not
+            # re-enable them for optimized builds.
+            "//:opt": [
+                "/OPT:REF",
+                "/OPT:ICF",
+            ],
+            "//conditions:default": [],
         }),
         linkshared = linkshared,
         tags = tags,
