@@ -36,6 +36,14 @@ bazel_dep(
     version = "20260107.1",
     repo_name = "com_google_absl",
 )
+single_version_override(
+    module_name = "abseil-cpp",
+    patches = [
+        # Avoid x86 inline assembly when targeting ARM64EC (for ARM64X binaries).
+        "bazel/abseil-cpp_arm64ec.patch",
+    ],
+    version = "20260107.1",
+)
 
 # abseil-py: 2.1.0 2024-01-17
 # https://github.com/abseil/abseil-py
@@ -50,6 +58,14 @@ bazel_dep(
     name = "protobuf",
     version = "34.1",
     repo_name = "com_google_protobuf",
+)
+single_version_override(
+    module_name = "protobuf",
+    patches = [
+        # Avoid x86 inline assembly when targeting ARM64EC (for ARM64X binaries).
+        "bazel/protobuf_arm64ec.patch",
+    ],
+    version = "34.1",
 )
 
 # googletest: 1.17.0 2025-05-01

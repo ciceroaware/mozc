@@ -1,0 +1,14 @@
+diff --git src/google/protobuf/varint_shuffle.h src/google/protobuf/varint_shuffle.h
+index e20df33..0882303 100644
+--- src/google/protobuf/varint_shuffle.h
++++ src/google/protobuf/varint_shuffle.h
+@@ -132,7 +132,8 @@ ShiftMixParseVarint(const char* p, int64_t& res1) {
+   // from ptr[8].
+   if (kIs64BitVarint && (last() & 1) == 0) {
+     static constexpr int bits = 64 - 1;
+-#if defined(__GCC_ASM_FLAG_OUTPUTS__) && defined(__x86_64__)
++#if defined(__GCC_ASM_FLAG_OUTPUTS__) && defined(__x86_64__) && \
++    !defined(_M_ARM64EC)
+     // Use a small instruction since this is an uncommon code path.
+     asm("btc %[bits], %[res3]" : [res3] "+r"(res3) : [bits] "i"(bits));
+ #else

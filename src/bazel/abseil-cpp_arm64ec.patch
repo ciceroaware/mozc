@@ -1,0 +1,31 @@
+diff --git absl/base/internal/unscaledcycleclock_config.h absl/base/internal/unscaledcycleclock_config.h
+index 9a0841d..5883591 100644
+--- absl/base/internal/unscaledcycleclock_config.h
++++ absl/base/internal/unscaledcycleclock_config.h
+@@ -20,9 +20,10 @@
+ #endif
+ 
+ // The following platforms have an implementation of a hardware counter.
+-#if defined(__i386__) || defined(__x86_64__) || defined(__aarch64__) || \
+-    defined(__powerpc__) || defined(__ppc__) || defined(_M_IX86) ||     \
+-    (defined(_M_X64) && !defined(_M_ARM64EC))
++#if (defined(__i386__) || defined(__x86_64__) || defined(__aarch64__) || \
++     defined(__powerpc__) || defined(__ppc__) || defined(_M_IX86) ||     \
++     defined(_M_X64)) &&                                                 \
++    !defined(_M_ARM64EC)
+ #define ABSL_HAVE_UNSCALED_CYCLECLOCK_IMPLEMENTATION 1
+ #else
+ #define ABSL_HAVE_UNSCALED_CYCLECLOCK_IMPLEMENTATION 0
+diff --git absl/base/prefetch.h absl/base/prefetch.h
+index 482cde3..fe4fbab 100644
+--- absl/base/prefetch.h
++++ absl/base/prefetch.h
+@@ -158,7 +158,7 @@ ABSL_ATTRIBUTE_ALWAYS_INLINE inline void PrefetchToLocalCacheForWrite(
+   // unless -march=broadwell or newer; this is not generally the default, so we
+   // manually emit prefetchw. PREFETCHW is recognized as a no-op on older Intel
+   // processors and has been present on AMD processors since the K6-2.
+-#if defined(__x86_64__) && !defined(__PRFCHW__)
++#if defined(__x86_64__) && !defined(__PRFCHW__) && !defined(_M_ARM64EC)
+   asm("prefetchw %0" : : "m"(*reinterpret_cast<const char*>(addr)));
+ #else
+   __builtin_prefetch(addr, 1, 3);
