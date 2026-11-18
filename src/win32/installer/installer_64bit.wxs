@@ -37,9 +37,6 @@
 <?define QtWidgetsFilename="Qt$(var.QtVer)Widgets.dll" ?>
 <?define QtWidgetsdFilename="Qt$(var.QtVer)Widgetsd.dll" ?>
 
-<?ifndef MozcTIP64ArmPath ?>
-  <?define MozcTIP64ArmPath="" ?>
-<?endif?>
 <?ifndef MozcTIP64XPath ?>
   <?define MozcTIP64XPath="" ?>
 <?endif?>
@@ -106,14 +103,14 @@
     <Launch Condition="Privileged" Message="Google 日本語入力をインストールするには管理者権限が必要です。" />
     <Media Id="1" Cabinet="GoogleJapaneseInput.cab" EmbedCab="yes" CompressionLevel="high" />
 
-    <?if $(var.MozcTIP64ArmPath) == "" and $(var.MozcTIP64XPath) == "" and $(var.MozcUniversalInstaller) == "" ?>
-      <!--
-        This needs to be a secure property. Otherwise, it becomes an unexpected value in the
-        repair/uninstall mode. See https://github.com/google/mozc/issues/1410
-      -->
-      <Property Id="PROCESSOR_ARCHITECTURE" Secure="yes">
-        <RegistrySearch Id="ProcessorArchitectureValue" Type="raw" Root="HKLM" Key="System\CurrentControlSet\Control\Session Manager\Environment" Name="PROCESSOR_ARCHITECTURE" />
-      </Property>
+    <!--
+      This needs to be a secure property. Otherwise, it becomes an unexpected value in the
+      repair/uninstall mode. See https://github.com/google/mozc/issues/1410
+    -->
+    <Property Id="PROCESSOR_ARCHITECTURE" Secure="yes">
+      <RegistrySearch Id="ProcessorArchitectureValue" Type="raw" Root="HKLM" Key="System\CurrentControlSet\Control\Session Manager\Environment" Name="PROCESSOR_ARCHITECTURE" />
+    </Property>
+    <?if $(var.MozcTIP64XPath) == "" and $(var.MozcUniversalInstaller) == "" ?>
       <Launch Condition="(NOT (PROCESSOR_ARCHITECTURE=&quot;ARM64&quot;)) OR UPGRADING OR (REMOVE=&quot;ALL&quot;)" Message="このインストーラーは ARM64 版 Windows に対応していません。別途用意された専用のインストーラーを使用してください。" />
     <?endif?>
 
@@ -158,8 +155,7 @@
     <Feature Id="GIMEJaInstall" Title="Google 日本語入力" Level="1">
       <ComponentRef Id="GIMEJaTIP32" />
       <ComponentRef Id="GIMEJaTIP64" />
-      <?if $(var.MozcTIP64ArmPath) != "" and $(var.MozcTIP64XPath) != "" ?>
-        <ComponentRef Id="GIMEJaTIP64Arm" />
+      <?if $(var.MozcTIP64XPath) != "" ?>
         <ComponentRef Id="GIMEJaTIP64X" />
       <?endif?>
       <ComponentRef Id="GIMEJaBroker" />
@@ -298,15 +294,20 @@
           <Component Id="GIMEJaTIP32" Permanent="no" Bitness="always32">
             <File Id="GoogleIMEJaTIP32.dll" Name="GoogleIMEJaTIP32.dll" DiskId="1" Checksum="yes" Source="$(var.MozcTIP32Path)" Vital="yes" />
           </Component>
-          <Component Id="GIMEJaTIP64" Permanent="no" Bitness="always64">
-            <File Id="GoogleIMEJaTIP64.dll" Name="GoogleIMEJaTIP64.dll" DiskId="1" Checksum="yes" Source="$(var.MozcTIP64Path)" Vital="yes" />
-          </Component>
-          <?if $(var.MozcTIP64ArmPath) != "" and $(var.MozcTIP64XPath) != "" ?>
-            <Component Id="GIMEJaTIP64Arm" Permanent="no" Bitness="always64">
-              <File Id="GoogleIMEJaTIP64Arm.dll" Name="GoogleIMEJaTIP64Arm.dll" DiskId="1" Checksum="yes" Source="$(var.MozcTIP64ArmPath)" Vital="yes" />
+          <?if $(var.MozcTIP64XPath) != "" ?>
+            <!--
+              On ARM64 Windows, GoogleIMEJaTIP64X.dll (ARM64X) is used by both ARM64 and x64
+              processes. GoogleIMEJaTIP64.dll (x64) is installed only on x64 Windows.
+            -->
+            <Component Id="GIMEJaTIP64" Permanent="no" Bitness="always64" Condition="NOT (PROCESSOR_ARCHITECTURE=&quot;ARM64&quot;)">
+              <File Id="GoogleIMEJaTIP64.dll" Name="GoogleIMEJaTIP64.dll" DiskId="1" Checksum="yes" Source="$(var.MozcTIP64Path)" Vital="yes" />
             </Component>
-            <Component Id="GIMEJaTIP64X" Permanent="no" Bitness="always64">
+            <Component Id="GIMEJaTIP64X" Permanent="no" Bitness="always64" Condition="PROCESSOR_ARCHITECTURE=&quot;ARM64&quot;">
               <File Id="GoogleIMEJaTIP64X.dll" Name="GoogleIMEJaTIP64X.dll" DiskId="1" Checksum="yes" Source="$(var.MozcTIP64XPath)" Vital="yes" />
+            </Component>
+          <?else?>
+            <Component Id="GIMEJaTIP64" Permanent="no" Bitness="always64">
+              <File Id="GoogleIMEJaTIP64.dll" Name="GoogleIMEJaTIP64.dll" DiskId="1" Checksum="yes" Source="$(var.MozcTIP64Path)" Vital="yes" />
             </Component>
           <?endif?>
           <Component Id="GIMEJaBroker" Permanent="no">

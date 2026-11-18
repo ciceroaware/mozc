@@ -97,7 +97,6 @@ genrule(
         "@wix//:wix.exe",
     ] + select({
         ":build_arm64_binaries": [
-            "//win32/tip:mozc_tip64arm",
             "//win32/tip:mozc_tip64x",
         ],
         "//conditions:default": [],
@@ -123,10 +122,7 @@ genrule(
         "--branding=" + BRANDING,
         "--vs_install_dir=\"$$BAZEL_VC\"",
     ]) + select({
-        ":build_arm64_binaries": " " + " ".join([
-            "--mozc_tip64arm=$(location //win32/tip:mozc_tip64arm)",
-            "--mozc_tip64x=$(location //win32/tip:mozc_tip64x)",
-        ]),
+        ":build_arm64_binaries": " --mozc_tip64x=$(location //win32/tip:mozc_tip64x)",
         "//conditions:default": "",
     }) + select({
         ":debug_build": " --debug_build",

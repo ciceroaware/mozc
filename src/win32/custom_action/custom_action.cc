@@ -91,6 +91,21 @@ std::wstring GetMozcComponentPath(const absl::string_view filename) {
       absl::StrCat(mozc::SystemUtil::GetServerDirectory(), "\\", filename));
 }
 
+// Returns the path to the 64-bit TIP DLL for the native CPU architecture.
+// Unlike 32-bit TIP DLL, which is always x86, the 64-bit TIP DLL is x64 on x64
+// Windows and ARM64X on ARM64 Windows. ARM64X DLL can be loaded into both
+// ARM64 and x64 processes.
+std::wstring GetMozcTIP64Path() {
+  USHORT process_machine = IMAGE_FILE_MACHINE_UNKNOWN;
+  USHORT native_machine = IMAGE_FILE_MACHINE_UNKNOWN;
+  const bool is_arm64_machine =
+      ::IsWow64Process2(::GetCurrentProcess(), &process_machine,
+                        &native_machine) &&
+      native_machine == IMAGE_FILE_MACHINE_ARM64;
+  return GetMozcComponentPath(is_arm64_machine ? mozc::kMozcTIP64X
+                                               : mozc::kMozcTIP64);
+}
+
 // Retrieves the value for an installer property.
 // Returns an empty string if a property corresponding to |name| is not found or
 // error occurs.
@@ -226,7 +241,7 @@ UINT __stdcall EnsureAllApplicationPackagesPermisssions(MSIHANDLE msi_handle) {
     return ERROR_INSTALL_FAILURE;
   }
   if (!mozc::WinSandbox::EnsureAllApplicationPackagesPermisssion(
-          GetMozcComponentPath(mozc::kMozcTIP64),
+          GetMozcTIP64Path(),
           mozc::WinSandbox::AppContainerVisibilityType::kProgramFiles)) {
     return ERROR_INSTALL_FAILURE;
   }
@@ -450,21 +465,10 @@ UINT __stdcall WriteApValueRollback(MSIHANDLE msi_handle) {
 UINT __stdcall RegisterTIP(MSIHANDLE msi_handle) {
   DEBUG_BREAK_FOR_DEBUGGER();
   mozc::ScopedCOMInitializer com_initializer;
-  HRESULT result = S_OK;
 
   // Register 64-bit TIP COM server.
-  // Unlike 32-bit TIP DLL, which is always x86, the expected 64-bit TIP DLL
-  // can be x64 or ARM64X depending on the target environment.
-  USHORT process_machine = IMAGE_FILE_MACHINE_UNKNOWN;
-  USHORT native_machine = IMAGE_FILE_MACHINE_UNKNOWN;
-  result = IsWow64Process2(::GetCurrentProcess(), &process_machine,
-                           &native_machine);
-  const bool is_arm64_machine =
-      SUCCEEDED(result) && native_machine == IMAGE_FILE_MACHINE_ARM64;
-  const std::wstring tip64_path = GetMozcComponentPath(
-      is_arm64_machine ? mozc::kMozcTIP64X : mozc::kMozcTIP64);
-
-  result = mozc::win32::TsfRegistrar::RegisterCOMServer(
+  const std::wstring tip64_path = GetMozcTIP64Path();
+  HRESULT result = mozc::win32::TsfRegistrar::RegisterCOMServer(
       tip64_path.c_str(), tip64_path.length(),
       mozc::win32::COMServerBitness::k64bit);
   if (FAILED(result)) {

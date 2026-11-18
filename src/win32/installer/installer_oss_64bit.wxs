@@ -38,9 +38,6 @@
 <?define QtWidgetsFilename="Qt$(var.QtVer)Widgets.dll" ?>
 <?define QtWidgetsdFilename="Qt$(var.QtVer)Widgetsd.dll" ?>
 
-<?ifndef MozcTIP64ArmPath ?>
-  <?define MozcTIP64ArmPath="" ?>
-<?endif?>
 <?ifndef MozcTIP64XPath ?>
   <?define MozcTIP64XPath="" ?>
 <?endif?>
@@ -107,14 +104,14 @@
     <Launch Condition="Privileged" Message="Mozc をインストールするには管理者権限が必要です。" />
     <Media Id="1" Cabinet="Mozc.cab" EmbedCab="yes" CompressionLevel="high" />
 
-    <?if $(var.MozcTIP64ArmPath) == "" and $(var.MozcTIP64XPath) == "" and $(var.MozcUniversalInstaller) == "" ?>
-      <!--
-        This needs to be a secure property. Otherwise, it becomes an unexpected value in the
-        repair/uninstall mode. See https://github.com/google/mozc/issues/1410
-      -->
-      <Property Id="PROCESSOR_ARCHITECTURE" Secure="yes">
-        <RegistrySearch Id="ProcessorArchitectureValue" Type="raw" Root="HKLM" Key="System\CurrentControlSet\Control\Session Manager\Environment" Name="PROCESSOR_ARCHITECTURE" />
-      </Property>
+    <!--
+      This needs to be a secure property. Otherwise, it becomes an unexpected value in the
+      repair/uninstall mode. See https://github.com/google/mozc/issues/1410
+    -->
+    <Property Id="PROCESSOR_ARCHITECTURE" Secure="yes">
+      <RegistrySearch Id="ProcessorArchitectureValue" Type="raw" Root="HKLM" Key="System\CurrentControlSet\Control\Session Manager\Environment" Name="PROCESSOR_ARCHITECTURE" />
+    </Property>
+    <?if $(var.MozcTIP64XPath) == "" and $(var.MozcUniversalInstaller) == "" ?>
       <Launch Condition="(NOT (PROCESSOR_ARCHITECTURE=&quot;ARM64&quot;)) OR UPGRADING OR (REMOVE=&quot;ALL&quot;)" Message="このインストーラーは ARM64 版 Windows に対応していません。別途用意された専用のインストーラーを使用してください。" />
     <?endif?>
 
@@ -142,8 +139,7 @@
     <Feature Id="MozcInstall" Title="Mozc" Level="1">
       <ComponentRef Id="MozcTIP32" />
       <ComponentRef Id="MozcTIP64" />
-      <?if $(var.MozcTIP64ArmPath) != "" and $(var.MozcTIP64XPath) != "" ?>
-        <ComponentRef Id="MozcTIP64Arm" />
+      <?if $(var.MozcTIP64XPath) != "" ?>
         <ComponentRef Id="MozcTIP64X" />
       <?endif?>
       <ComponentRef Id="MozcBroker" />
@@ -273,15 +269,20 @@
         <Component Id="MozcTIP32" Permanent="no" Bitness="always32">
           <File Id="mozc_tip32.dll" Name="mozc_tip32.dll" DiskId="1" Checksum="yes" Source="$(var.MozcTIP32Path)" Vital="yes" />
         </Component>
-        <Component Id="MozcTIP64" Permanent="no" Bitness="always64">
-          <File Id="mozc_tip64.dll" Name="mozc_tip64.dll" DiskId="1" Checksum="yes" Source="$(var.MozcTIP64Path)" Vital="yes" />
-        </Component>
-        <?if $(var.MozcTIP64ArmPath) != "" and $(var.MozcTIP64XPath) != "" ?>
-          <Component Id="MozcTIP64Arm" Permanent="no" Bitness="always64">
-            <File Id="mozc_tip64arm.dll" Name="mozc_tip64arm.dll" DiskId="1" Checksum="yes" Source="$(var.MozcTIP64ArmPath)" Vital="yes" />
+        <?if $(var.MozcTIP64XPath) != "" ?>
+          <!--
+            On ARM64 Windows, mozc_tip64x.dll (ARM64X) is used by both ARM64 and x64
+            processes. mozc_tip64.dll (x64) is installed only on x64 Windows.
+          -->
+          <Component Id="MozcTIP64" Permanent="no" Bitness="always64" Condition="NOT (PROCESSOR_ARCHITECTURE=&quot;ARM64&quot;)">
+            <File Id="mozc_tip64.dll" Name="mozc_tip64.dll" DiskId="1" Checksum="yes" Source="$(var.MozcTIP64Path)" Vital="yes" />
           </Component>
-          <Component Id="MozcTIP64X" Permanent="no" Bitness="always64">
+          <Component Id="MozcTIP64X" Permanent="no" Bitness="always64" Condition="PROCESSOR_ARCHITECTURE=&quot;ARM64&quot;">
             <File Id="mozc_tip64x.dll" Name="mozc_tip64x.dll" DiskId="1" Checksum="yes" Source="$(var.MozcTIP64XPath)" Vital="yes" />
+          </Component>
+        <?else?>
+          <Component Id="MozcTIP64" Permanent="no" Bitness="always64">
+            <File Id="mozc_tip64.dll" Name="mozc_tip64.dll" DiskId="1" Checksum="yes" Source="$(var.MozcTIP64Path)" Vital="yes" />
           </Component>
         <?endif?>
         <Component Id="MozcBroker" Permanent="no">

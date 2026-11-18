@@ -66,19 +66,21 @@ END
 // Version
 //
 
+// On ARM64, the TIP DLL is built only as an ARM64X DLL, whose resources are
+// compiled for ARM64.
 #if defined(_ARM64_)
   #ifndef MOZC_RES_INTERNAL_NAME
     #if defined(GOOGLE_JAPANESE_INPUT_BUILD)
-      #define MOZC_RES_INTERNAL_NAME "GoogleIMEJaTIP64Arm"
+      #define MOZC_RES_INTERNAL_NAME "GoogleIMEJaTIP64X"
     #elif defined(MOZC_BUILD)
-      #define MOZC_RES_INTERNAL_NAME "mozc_tip64Arm"
+      #define MOZC_RES_INTERNAL_NAME "mozc_tip64x"
     #endif
   #endif
   #ifndef MOZC_RES_ORIGINAL_FILENAME
     #if defined(GOOGLE_JAPANESE_INPUT_BUILD)
-      #define MOZC_RES_ORIGINAL_FILENAME "GoogleIMEJaTIP64Arm.dll"
+      #define MOZC_RES_ORIGINAL_FILENAME "GoogleIMEJaTIP64X.dll"
     #elif defined(MOZC_BUILD)
-      #define MOZC_RES_ORIGINAL_FILENAME "mozc_tip64arm.dll"
+      #define MOZC_RES_ORIGINAL_FILENAME "mozc_tip64x.dll"
     #endif
   #endif
 #elif defined(_WIN64)
