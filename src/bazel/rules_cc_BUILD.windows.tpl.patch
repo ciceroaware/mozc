@@ -8,7 +8,15 @@
          "x64_windows_msys": ":cc-compiler-x64_windows_msys",
          "x64_windows": ":cc-compiler-x64_windows",
          "x64_x86_windows": ":cc-compiler-x64_x86_windows",
-@@ -644,6 +645,7 @@
+@@ -93,6 +94,7 @@
+         "arm64_windows": ":cc-compiler-arm64_windows",
+         "x64_arm64_windows|clang-cl": ":cc-compiler-arm64_windows-clang-cl",
+         "arm64_windows|clang-cl": ":cc-compiler-arm64_windows-clang-cl",
++        "arm64x_windows|clang-cl": ":cc-compiler-arm64x_windows-clang-cl",
+         "armeabi-v7a": ":cc-compiler-armeabi-v7a",
+     },
+ )
+@@ -644,6 +646,7 @@
          "strip": "wrapper/bin/msvc_nop.bat",
      },
      archiver_flags = ["/MACHINE:X64"],
@@ -16,7 +24,7 @@
      default_link_flags = ["/MACHINE:X64"],
      dbg_mode_debug_flag = "%{clang_cl_dbg_mode_debug_flag_x64}",
      fastbuild_mode_debug_flag = "%{clang_cl_fastbuild_mode_debug_flag_x64}",
-@@ -658,7 +660,6 @@
+@@ -658,7 +661,6 @@
  toolchain(
      name = "cc-toolchain-x64_windows-clang-cl",
      exec_compatible_with = [
@@ -24,7 +32,7 @@
          "@platforms//os:windows",
          "@rules_cc//cc/private/toolchain:clang-cl",
      ],
-@@ -671,6 +672,74 @@
+@@ -671,6 +673,74 @@
  )
  
  cc_toolchain(
@@ -99,7 +107,7 @@
      name = "cc-compiler-arm64_windows-clang-cl",
      toolchain_identifier = "clang_cl_arm64",
      toolchain_config = ":clang_cl_arm64",
-@@ -717,6 +786,7 @@
+@@ -717,6 +787,7 @@
          "strip": "wrapper/bin/msvc_nop.bat",
      },
      archiver_flags = ["/MACHINE:ARM64"],
@@ -107,3 +115,84 @@
      default_link_flags = ["/MACHINE:ARM64"],
      dbg_mode_debug_flag = "%{clang_cl_dbg_mode_debug_flag_arm64}",
      fastbuild_mode_debug_flag = "%{clang_cl_fastbuild_mode_debug_flag_arm64}",
+@@ -742,6 +813,80 @@
+     toolchain_type = "@bazel_tools//tools/cpp:toolchain_type",
+ )
+ 
++cc_toolchain(
++    name = "cc-compiler-arm64x_windows-clang-cl",
++    toolchain_identifier = "clang_cl_arm64x",
++    toolchain_config = ":clang_cl_arm64x",
++    all_files = ":empty",
++    ar_files = ":empty",
++    as_files = ":clangcl_compiler_files",
++    compiler_files = ":clangcl_compiler_files",
++    dwp_files = ":empty",
++    linker_files = ":empty",
++    objcopy_files = ":empty",
++    strip_files = ":empty",
++    supports_param_files = 1,
++)
++
++cc_toolchain_config(
++    name = "clang_cl_arm64x",
++    cpu = "arm64x_windows",
++    compiler = "clang-cl",
++    host_system_name = "local",
++    target_system_name = "aarch64-pc-windows-msvc",
++    target_libc = "ucrt",
++    abi_version = "local",
++    abi_libc_version = "local",
++    toolchain_identifier = "clang_cl_arm64x",
++    msvc_env_tmp = "%{clang_cl_env_tmp_arm64}",
++    msvc_env_path = "%{clang_cl_env_path_arm64}",
++    msvc_env_include = "%{clang_cl_env_include_arm64}",
++    msvc_env_lib = "%{clang_cl_env_lib_arm64}",
++    msvc_cl_path = "%{clang_cl_cl_path_arm64}",
++    msvc_ml_path = "%{clang_cl_ml_path_arm64}",
++    msvc_link_path = "%{clang_cl_link_path_arm64}",
++    msvc_lib_path = "%{clang_cl_lib_path_arm64}",
++    cxx_builtin_include_directories = [%{clang_cl_cxx_builtin_include_directories_arm64}],
++    tool_paths = {
++        "ar": "%{clang_cl_lib_path_arm64}",
++        "ml": "%{clang_cl_ml_path_arm64}",
++        "cpp": "%{clang_cl_cl_path_arm64}",
++        "gcc": "%{clang_cl_cl_path_arm64}",
++        "gcov": "wrapper/bin/msvc_nop.bat",
++        "ld": "%{clang_cl_link_path_arm64}",
++        "nm": "wrapper/bin/msvc_nop.bat",
++        "objcopy": "wrapper/bin/msvc_nop.bat",
++        "objdump": "wrapper/bin/msvc_nop.bat",
++        "strip": "wrapper/bin/msvc_nop.bat",
++    },
++    archiver_flags = ["/MACHINE:ARM64X"],
++    default_compile_flags = ["--target=aarch64-pc-windows-msvc", "-marm64x"],
++    default_link_flags = ["/MACHINE:ARM64X"],
++    dbg_mode_debug_flag = "%{clang_cl_dbg_mode_debug_flag_arm64}",
++    fastbuild_mode_debug_flag = "%{clang_cl_fastbuild_mode_debug_flag_arm64}",
++    supports_parse_showincludes = %{clang_cl_parse_showincludes_arm64},
++    all_compile_flags = [%{all_compile_flags}],
++    conly_flags = [%{conly_flags}],
++    cxx_flags = [%{cxx_flags}],
++    link_flags = [%{link_flags}],
++%{win32_winnt_flag}
++)
++
++toolchain(
++    name = "cc-toolchain-arm64x_windows-clang-cl",
++    exec_compatible_with = [
++        "@platforms//os:windows",
++        "@rules_cc//cc/private/toolchain:clang-cl",
++    ],
++    target_compatible_with = [
++        "@platforms//cpu:arm64",
++        "@platforms//os:windows",
++        "@@//:arm64x",
++    ],
++    toolchain = ":cc-compiler-arm64x_windows-clang-cl",
++    toolchain_type = "@bazel_tools//tools/cpp:toolchain_type",
++)
++
+ cc_toolchain(
+     name = "cc-compiler-armeabi-v7a",
+     toolchain_identifier = "stub_armeabi-v7a",

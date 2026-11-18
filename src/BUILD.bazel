@@ -141,6 +141,29 @@ platform(
     ],
 )
 
+# ARM64X (a single binary with both ARM64 and ARM64EC code) is modeled as arm64
+# plus an extra constraint. The ARM64EC half is compiled in the same
+# configuration with clang-cl's -marm64x, so select() sees it as arm64.
+constraint_setting(
+    name = "windows_arm64x_setting",
+    visibility = ["//visibility:public"],
+)
+
+constraint_value(
+    name = "arm64x",
+    constraint_setting = ":windows_arm64x_setting",
+    visibility = ["//visibility:public"],
+)
+
+platform(
+    name = "windows-arm64x",
+    constraint_values = [
+        "@platforms//cpu:arm64",
+        "@platforms//os:windows",
+        ":arm64x",
+    ],
+)
+
 # Special target so as to define special macros for each platforms.
 # Don't depend on this directly. Use mozc_cc_(library|binary|test) rule instead.
 cc_library(

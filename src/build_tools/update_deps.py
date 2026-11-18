@@ -237,6 +237,11 @@ def remove_directory(path: os.PathLike[str]):
     shutil.rmtree(path, onerror=_remove_readonly)
 
 
+# llvm-objcopy.exe is used by clang-cl to merge the ARM64 and ARM64EC objects
+# into a single ARM64X object when -marm64x is specified.
+LLVM_BIN_FILES = ['clang-cl.exe', 'llvm-lib.exe', 'lld-link.exe', 'llvm-objcopy.exe']
+
+
 def llvm_extract_filter(
     members: Iterator[tarfile.TarInfo],
 ) -> Iterator[tarfile.TarInfo]:
@@ -263,7 +268,7 @@ def llvm_extract_filter(
       if (
           len(paths) == 3
           and paths[1] == 'bin'
-          and paths[2] in ['clang-cl.exe', 'llvm-lib.exe', 'lld-link.exe']
+          and paths[2] in LLVM_BIN_FILES
       ):
         skipping = False
       elif len(paths) >= 2 and paths[1] in ['include', 'lib']:
@@ -305,7 +310,7 @@ class StatefulLLVMExtractionFilter:
     if (
         len(paths) == 3
         and paths[1] == 'bin'
-        and paths[2] in ['clang-cl.exe', 'llvm-lib.exe', 'lld-link.exe']
+        and paths[2] in LLVM_BIN_FILES
     ):
       skipping = False
     elif len(paths) >= 2 and paths[1] in ['include', 'lib']:
