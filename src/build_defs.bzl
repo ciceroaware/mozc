@@ -280,11 +280,18 @@ def _win_executable_transition_impl(
 
     features = _append_if_absent(features, "generate_pdb_file")
 
+    # "dynamic_link_msvcrt" and "static_link_msvcrt" are mutually exclusive in
+    # hermetic-llvm, where "dynamic_link_msvcrt" is enabled by default. Thus the
+    # other one needs to be explicitly disabled with the "-" prefix.
     if attr.static_crt:
         features = _remove_if_present(features, "dynamic_link_msvcrt")
+        features = _remove_if_present(features, "-static_link_msvcrt")
+        features = _append_if_absent(features, "-dynamic_link_msvcrt")
         features = _append_if_absent(features, "static_link_msvcrt")
     else:
         features = _remove_if_present(features, "static_link_msvcrt")
+        features = _remove_if_present(features, "-dynamic_link_msvcrt")
+        features = _append_if_absent(features, "-static_link_msvcrt")
         features = _append_if_absent(features, "dynamic_link_msvcrt")
 
     if attr.platform:
