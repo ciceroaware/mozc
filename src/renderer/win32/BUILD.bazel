@@ -29,6 +29,7 @@
 
 # Mozc Windows renderer.
 
+load("@bazel_skylib//rules:common_settings.bzl", "bool_flag")
 load(
     "//:build_defs.bzl",
     "MOZC_TAGS",
@@ -38,6 +39,7 @@ load(
     "mozc_win32_cc_prod_binary",
     "mozc_win32_resource_from_template",
 )
+load("//bazel:qt.bzl", "mozc_cc_qt_library")
 
 package(
     default_visibility = ["//visibility:private"],
@@ -45,9 +47,28 @@ package(
     features = ["gdi"],
 )
 
+# Experimental: lets mozc_renderer use Qt instead of Direct2D and DirectWrite
+# to render text with the following option.
+#   --//renderer/win32:use_qt_text_renderer
+bool_flag(
+    name = "use_qt_text_renderer",
+    build_setting_default = False,
+)
+
+config_setting(
+    name = "qt_text_renderer_enabled",
+    flag_values = {
+        ":use_qt_text_renderer": "True",
+    },
+)
+
 mozc_win32_cc_prod_binary(
     name = "win32_renderer_main",
     srcs = ["win32_renderer_main.cc"],
+    defines = select({
+        ":qt_text_renderer_enabled": ["MOZC_USE_QT_TEXT_RENDERER"],
+        "//conditions:default": [],
+    }),
     executable_name_map = {
         "Mozc": "mozc_renderer.exe",
         "GoogleJapaneseInput": "GoogleIMEJaRenderer.exe",
@@ -66,7 +87,10 @@ mozc_win32_cc_prod_binary(
         "//base/win32:winmain",
         "//renderer:init_mozc_renderer",
         "@com_google_absl//absl/log",
-    ],
+    ] + select({
+        ":qt_text_renderer_enabled": [":qt_text_renderer"],
+        "//conditions:default": [],
+    }),
 )
 
 mozc_win32_resource_from_template(
@@ -197,6 +221,26 @@ mozc_cc_library(
         "//base:coordinates",
         "//bazel/win32:d2d1",
         "//bazel/win32:dwrite",
+        "//protocol:renderer_cc_proto",
+        "@com_google_absl//absl/log",
+        "@com_google_absl//absl/types:span",
+        "@com_microsoft_wil//:wil",
+    ],
+)
+
+mozc_cc_qt_library(
+    name = "qt_text_renderer",
+    srcs = ["qt_text_renderer.cc"],
+    hdrs = ["qt_text_renderer.h"],
+    tags = MOZC_TAGS.WIN_ONLY,
+    target_compatible_with = ["@platforms//os:windows"],
+    visibility = ["//visibility:private"],
+    deps = [
+        ":text_renderer",
+        ":win32_dpi_util",
+        ":win32_font_util",
+        "//base:coordinates",
+        "//bazel/win32:gdi32",
         "//protocol:renderer_cc_proto",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/types:span",

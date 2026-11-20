@@ -40,6 +40,10 @@
 #include "renderer/win32/text_renderer.h"
 #include "renderer/win32/win32_server.h"
 
+#if defined(MOZC_USE_QT_TEXT_RENDERER)
+#include "renderer/win32/qt_text_renderer.h"
+#endif  // MOZC_USE_QT_TEXT_RENDERER
+
 int main(int argc, char* argv[]) {
   mozc::renderer::InitMozcRenderer(argv[0], &argc, &argv);
 
@@ -48,7 +52,11 @@ int main(int argc, char* argv[]) {
   // The text renderer is shared among all the windows, and needs to outlive
   // |server|.
   const std::unique_ptr<mozc::renderer::win32::TextRenderer> text_renderer =
+#if defined(MOZC_USE_QT_TEXT_RENDERER)
+      mozc::renderer::win32::CreateQtTextRenderer(::GetDpiForSystem());
+#else   // MOZC_USE_QT_TEXT_RENDERER
       mozc::renderer::win32::TextRenderer::Create(::GetDpiForSystem());
+#endif  // MOZC_USE_QT_TEXT_RENDERER
   if (text_renderer == nullptr) {
     // Direct2D and DirectWrite are supposed to be always available on the
     // supported versions of Windows. There is nothing we can render without
