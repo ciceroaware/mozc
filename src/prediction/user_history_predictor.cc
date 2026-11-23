@@ -1578,13 +1578,16 @@ UserHistoryPredictor::CreateEntryQueueFromHistoryForPrediction(
 
   EntryPriorityQueue entry_queue;
 
+  // Looked up once, as asking the user dictionary for every entry is costly.
+  const bool has_suppressed_entries = user_dictionary_.HasSuppressedEntries();
+
   storage_.ForEach([&](uint64_t fp, const Entry& entry) {
     // already found enough entry_queue.
     if (entry_queue.size() >= max_entry_queue_size) {
       return false;
     }
 
-    if (!IsValidEntryIgnoringRemovedField(entry)) {
+    if (!IsValidEntryIgnoringRemovedField(entry, has_suppressed_entries)) {
       return true;
     }
 
@@ -1636,13 +1639,16 @@ UserHistoryPredictor::CreateEntryQueueFromHistoryForConversion(
   const std::string request_key = request.composer().GetQueryForConversion();
   EntryPriorityQueue entry_queue;
 
+  // Looked up once, as asking the user dictionary for every entry is costly.
+  const bool has_suppressed_entries = user_dictionary_.HasSuppressedEntries();
+
   storage_.ForEach([&](uint64_t fp, const Entry& entry) {
     // already found enough entry_queue.
     if (entry_queue.size() >= max_entry_queue_size) {
       return false;
     }
 
-    if (!IsValidEntryIgnoringRemovedField(entry)) {
+    if (!IsValidEntryIgnoringRemovedField(entry, has_suppressed_entries)) {
       return true;
     }
 
@@ -1970,7 +1976,14 @@ bool UserHistoryPredictor::IsValidEntry(const Entry& entry) const {
 
 bool UserHistoryPredictor::IsValidEntryIgnoringRemovedField(
     const Entry& entry) const {
-  if (user_dictionary_.IsSuppressedEntry(entry.key(), entry.value())) {
+  return IsValidEntryIgnoringRemovedField(
+      entry, user_dictionary_.HasSuppressedEntries());
+}
+
+bool UserHistoryPredictor::IsValidEntryIgnoringRemovedField(
+    const Entry& entry, bool has_suppressed_entries) const {
+  if (has_suppressed_entries &&
+      user_dictionary_.IsSuppressedEntry(entry.key(), entry.value())) {
     return false;
   }
 

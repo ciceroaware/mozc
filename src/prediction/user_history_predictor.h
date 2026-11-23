@@ -231,6 +231,10 @@ class UserHistoryPredictor : public PredictorInterface {
   bool IsValidEntry(const Entry& entry) const;
   // The same as IsValidEntry except that removed field is ignored.
   bool IsValidEntryIgnoringRemovedField(const Entry& entry) const;
+  // The same as above with the result of HasSuppressedEntries() of the user
+  // dictionary, for callers that check many entries.
+  bool IsValidEntryIgnoringRemovedField(const Entry& entry,
+                                        bool has_suppressed_entries) const;
 
   // Returns "tweaked" score of result_entry.
   // the score is basically determined by "last_access_time", (a.k.a,
